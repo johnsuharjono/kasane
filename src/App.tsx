@@ -35,13 +35,7 @@ import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { QueryPane } from "./components/QueryPane";
-import {
-  useEffect,
-  useLayoutEffect,
-  useRef,
-  useState,
-  type CSSProperties,
-} from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   CommandPalette,
   type PaletteAction,
@@ -842,18 +836,7 @@ export default function App() {
       <BookOpen size={14} aria-hidden="true" />
     );
   return (
-    <div
-      className={`app ${sidebar ? "" : "sidebar-hidden"}`}
-      style={
-        {
-          // Gray is the "no color" default, so it gets no title bar accent.
-          "--connection":
-            activeWorkspace?.color && activeWorkspace.color !== "gray"
-              ? connectionColor(activeWorkspace)
-              : "transparent",
-        } as CSSProperties
-      }
-    >
+    <div className={`app ${sidebar ? "" : "sidebar-hidden"}`}>
       <header className="titlebar" data-tauri-drag-region>
         <div className="traffic-space" />
         <Button

@@ -1677,7 +1677,6 @@
     padding: 0 10px 0 12px;
     background: var(--chrome);
     border-bottom: 1px solid var(--border);
-    box-shadow: inset 0 2px 0 var(--connection);
     align-items: center;
   }
   .traffic-space {
