@@ -13,7 +13,12 @@ import {
 } from "@tauri-apps/plugin-dialog";
 import { TableBrowser } from "./components/TableBrowser";
 import { ExecutionView } from "./components/ExecutionView";
-import { tableQuery, tableCountQuery, TABLE_PAGE_SIZE } from "./table-query";
+import {
+  tableQuery,
+  tableCountQuery,
+  TABLE_PAGE_SIZE,
+  defaultTableSettings,
+} from "./table-query";
 import type { TableSettings } from "./types";
 import {
   ContextMenu,
@@ -30,18 +35,37 @@ import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { QueryPane } from "./components/QueryPane";
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
+import {
+  CommandPalette,
+  type PaletteAction,
+} from "./components/CommandPalette";
+import { useAppearance } from "./appearance";
+import { connectionColor } from "./connection-colors";
 import {
   FolderOpen,
   BookOpen,
+  BookPlus,
+  FilePlus2,
+  Moon,
+  Sun,
+  PanelLeft,
+  Code2,
+  Eye,
+  Filter,
+  KeyRound,
   ChevronRight,
   Database,
   FileCode2,
-  Layers,
   Plus,
   Play,
   Search,
-  ListFilter,
   Square,
   Table2,
   X,
@@ -50,12 +74,7 @@ import {
   Trash2,
   Save,
   RefreshCw,
-  Settings2,
-  PanelLeftClose,
-  PanelLeftOpen,
   CircleHelp,
-  ArrowUpRight,
-  FileText,
   Check,
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
@@ -109,6 +128,12 @@ export default function App() {
   const [revision, setRevision] = useState(0);
   const [paused, setPaused] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  // Success messages fade on their own; errors stay until dismissed.
+  const [flash, setFlash] = useState("");
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [hiddenTabs, setHiddenTabs] = useState<string[]>([]);
+  const tabStrip = useRef<HTMLElement>(null);
+  const { resolved: theme, setAppearance } = useAppearance();
   const explorerState = explorer[selected] ?? { search: "", collapsed: [] };
   const search = explorerState.search;
   const setSearch = (search: string) =>
@@ -162,6 +187,11 @@ export default function App() {
   useEffect(() => {
     void refresh();
   }, []);
+  useEffect(() => {
+    if (!flash) return;
+    const timer = setTimeout(() => setFlash(""), 6000);
+    return () => clearTimeout(timer);
+  }, [flash]);
   // Ignore late catalog responses after switching connections.
   useEffect(() => {
     if (!native || !ready || !selected || paused === selected) {
@@ -369,7 +399,12 @@ export default function App() {
         const cell = current?.cells.find((c) => c.id === cellId);
         if (!current || !cell || cell.kind !== "sql") continue;
         const requestId = uid(),
-          source = cell.source;
+          source = cell.source,
+          runNumber =
+            Math.max(
+              0,
+              ...Object.values(current.executions).map((e) => e.runNumber ?? 0),
+            ) + 1;
         patch(t.id, (t) => ({
           ...t,
           executions: Object.fromEntries(
@@ -383,7 +418,12 @@ export default function App() {
             ]),
           ),
         }));
-        setExecution(t.id, cellId, { state: "running", requestId, source });
+        setExecution(t.id, cellId, {
+          state: "running",
+          requestId,
+          source,
+          runNumber,
+        });
         // Session state may have been changed by a preceding cell; never reconnect/retry a failed execution.
         try {
           const sessionId = await sessionFor(current);
@@ -392,6 +432,7 @@ export default function App() {
             state: "success",
             requestId,
             source,
+            runNumber,
             result,
             outdated: useWorkspace.getState().tabs.find((x) => x.id === t.id)
               ?.executions[cellId]?.outdated,
@@ -402,6 +443,7 @@ export default function App() {
             state: "failed",
             requestId,
             source,
+            runNumber,
             error,
           });
           if (error.disconnected)
@@ -473,7 +515,7 @@ export default function App() {
             current.connectionId !== document.connectionId,
         }));
         await refresh();
-        setNotice("SQL document saved locally.");
+        setFlash("SQL document saved locally.");
       } catch (e) {
         setNotice(asError(e).message);
       }
@@ -496,7 +538,7 @@ export default function App() {
           x.title !== t.title,
       }));
       await refresh();
-      setNotice("Notebook saved locally. SQL results are kept in memory only.");
+      setFlash("Notebook saved locally. SQL results are kept in memory only.");
     } catch (e) {
       setNotice(asError(e).message);
     }
@@ -510,7 +552,7 @@ export default function App() {
       if (!path) return;
       if (!path.toLowerCase().endsWith(".sql")) path += ".sql";
       await api.writeSQL(path, t.cells[0].source);
-      setNotice("SQL exported.");
+      setFlash("SQL exported.");
     } catch (e) {
       setNotice(asError(e).message);
     }
@@ -534,6 +576,14 @@ export default function App() {
       const t = useWorkspace
         .getState()
         .tabs.find((t) => t.id === useWorkspace.getState().activeId);
+      if (e.key.toLowerCase() === "k" && !e.shiftKey) {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+      }
+      if (e.key === "Enter" && e.shiftKey && t?.kind === "notebook") {
+        e.preventDefault();
+        runAll(t);
+      }
       if (e.key === ",") {
         e.preventDefault();
         setSettingsOpen(true);
@@ -631,15 +681,282 @@ export default function App() {
     setFocusedCell(cell.id);
     if (kind === "markdown") setMarkdownEditing(cell.id);
   }
+  function runAll(t: Tab) {
+    void runCells(
+      t,
+      t.kind === "query"
+        ? [t.cells[0].id]
+        : t.cells.filter((c) => c.kind === "sql").map((c) => c.id),
+    );
+  }
+  async function reconnect(t: Tab) {
+    try {
+      if (t.sessionId) await api.close(t.sessionId).catch(() => {});
+      await sessionFor({ ...t, sessionId: undefined, disconnected: false });
+      patch(t.id, (x) => ({
+        ...mutateCells(x, x.cells),
+        disconnected: false,
+      }));
+    } catch (e) {
+      setNotice(asError(e).message);
+    }
+  }
+  async function resetSession(t: Tab) {
+    await api.close(t.sessionId!);
+    patch(t.id, (x) => ({ ...mutateCells(x, x.cells), sessionId: undefined }));
+  }
+  function refreshTable(t: Tab) {
+    void runTable(t, t.tableSettings ?? defaultTableSettings);
+  }
+  // Tabs scroll horizontally; those outside the strip are listed in a "+N" menu.
+  useLayoutEffect(() => {
+    const strip = tabStrip.current;
+    if (!strip) return;
+    const measure = () => {
+      const left = strip.scrollLeft,
+        right = left + strip.clientWidth;
+      const hidden: string[] = [];
+      for (const el of strip.querySelectorAll<HTMLElement>("[data-tab-id]"))
+        if (
+          el.offsetLeft < left - 1 ||
+          el.offsetLeft + el.offsetWidth > right + 1
+        )
+          hidden.push(el.dataset.tabId!);
+      setHiddenTabs((old) =>
+        old.join("\0") === hidden.join("\0") ? old : hidden,
+      );
+    };
+    strip
+      .querySelector<HTMLElement>(
+        `[data-tab-id="${CSS.escape(activeId ?? "")}"]`,
+      )
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+    measure();
+    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
+    observer.observe(strip);
+    strip.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      observer.disconnect();
+      strip.removeEventListener("scroll", measure);
+    };
+  }, [activeId, visibleTabs.length, sidebar]);
+  const query = search.toLowerCase();
+  const allDocuments = [
+    ...visibleSQL.map((d) => ({
+      id: d.id,
+      kind: "sql" as const,
+      title: tabs.find((t) => t.id === d.id)?.title ?? d.title,
+      open: () => openSQL(d),
+    })),
+    ...visibleNotebooks.map((n) => ({
+      id: n.id,
+      kind: "notebook" as const,
+      title: n.title,
+      open: () => open(n),
+    })),
+  ].sort((a, b) => a.title.localeCompare(b.title));
+  const documents = allDocuments.filter((d) =>
+    d.title.toLowerCase().includes(query),
+  );
+  const activeWorkspace = connections.find((c) => c.id === selected);
+  const paletteActions: PaletteAction[] = [
+    {
+      id: "new-sql",
+      label: "New SQL document",
+      shortcut: "⌘T",
+      run: () => add("query", selected || null),
+    },
+    {
+      id: "new-notebook",
+      label: "New notebook",
+      shortcut: "⇧⌘T",
+      run: () => add("notebook", selected || null),
+    },
+    {
+      id: "import",
+      label: "Import SQL…",
+      shortcut: "⌘O",
+      run: () => void openSQLFile(),
+    },
+    ...(tab?.kind === "notebook" && !running
+      ? [
+          {
+            id: "run-all",
+            label: "Run all cells",
+            shortcut: "⇧⌘↵",
+            run: () => runAll(tab),
+          },
+        ]
+      : []),
+    ...connections
+      .filter((c) => c.id !== selected)
+      .map((c) => ({
+        id: `switch-${c.id}`,
+        label: `Switch to ${c.name}`,
+        color: connectionColor(c),
+        run: () => {
+          setPaused(null);
+          selectConnection(c.id);
+        },
+      })),
+    {
+      id: "new-connection",
+      label: "New connection…",
+      run: () => {
+        setEditConnection(undefined);
+        setConnectionDialog(true);
+      },
+    },
+    {
+      id: "sidebar",
+      label: sidebar ? "Hide sidebar" : "Show sidebar",
+      shortcut: "⌘\\",
+      run: () => setSidebar((v) => !v),
+    },
+    {
+      id: "theme",
+      label: theme === "dark" ? "Use light theme" : "Use dark theme",
+      run: () => setAppearance(theme === "dark" ? "light" : "dark"),
+    },
+    {
+      id: "settings",
+      label: "Settings",
+      shortcut: "⌘,",
+      run: () => setSettingsOpen(true),
+    },
+  ];
+  const sessionState = (t: Tab) =>
+    t.disconnected
+      ? { label: "Disconnected", tone: "warning" }
+      : Object.values(t.executions).some((e) => e.state === "running")
+        ? { label: "Running", tone: "busy" }
+        : t.sessionId
+          ? { label: "Session live", tone: "live" }
+          : { label: "No session", tone: "idle" };
+  const tabIcon = (t: Tab) =>
+    t.relation ? (
+      <Table2 size={14} aria-hidden="true" />
+    ) : t.kind === "query" ? (
+      <FileCode2 size={14} aria-hidden="true" />
+    ) : (
+      <BookOpen size={14} aria-hidden="true" />
+    );
   return (
-    <div className={`app ${sidebar ? "" : "sidebar-hidden"}`}>
+    <div
+      className={`app ${sidebar ? "" : "sidebar-hidden"}`}
+      style={
+        { "--connection": connectionColor(activeWorkspace) } as CSSProperties
+      }
+    >
       <header className="titlebar" data-tauri-drag-region>
         <div className="traffic-space" />
-        <div className="titlebar-brand" data-tauri-drag-region>
-          <Layers size={15} />
-          <strong>Kasane</strong>
-          <span>重ね</span>
-        </div>
+        <Button
+          className="quiet icon"
+          aria-label={sidebar ? "Hide sidebar" : "Show sidebar"}
+          aria-pressed={sidebar}
+          onClick={() => setSidebar((v) => !v)}
+        >
+          <PanelLeft size={16} />
+        </Button>
+        <nav className="tabbar" aria-label="Open documents" ref={tabStrip}>
+          {visibleTabs.map((t) => {
+            const tabRunning = Object.values(t.executions).some(
+              (e) => e.state === "running",
+            );
+            return (
+              <div
+                key={t.id}
+                data-tab-id={t.id}
+                className={`tab ${activeId === t.id ? "active" : ""}`}
+              >
+                <button onClick={() => activate(t.id)}>
+                  {tabIcon(t)}
+                  <span>{t.title}</span>
+                  {tabRunning ? (
+                    <span className="tab-spinner" aria-hidden="true" />
+                  ) : (
+                    t.dirty &&
+                    !t.relation && (
+                      <span className="dirty-dot" aria-hidden="true" />
+                    )
+                  )}
+                </button>
+                <Button
+                  className="quiet icon"
+                  aria-label={`Close ${t.title}`}
+                  onClick={() => closeTab(t)}
+                >
+                  <X size={12} />
+                </Button>
+              </div>
+            );
+          })}
+        </nav>
+        {hiddenTabs.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  className="quiet small tab-overflow"
+                  aria-label={`${hiddenTabs.length} more tabs`}
+                />
+              }
+            >
+              +{hiddenTabs.length}
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-56">
+              {visibleTabs
+                .filter((t) => hiddenTabs.includes(t.id))
+                .map((t) => (
+                  <DropdownMenuItem key={t.id} onClick={() => activate(t.id)}>
+                    {tabIcon(t)}
+                    {t.title}
+                  </DropdownMenuItem>
+                ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button
+                className="quiet icon new-tab"
+                aria-label="New document"
+              />
+            }
+          >
+            <Plus size={16} />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={() => add("query", selected || null)}>
+              SQL document<DropdownMenuShortcut>⌘T</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => add("notebook", selected || null)}>
+              Notebook<DropdownMenuShortcut>⌘⇧T</DropdownMenuShortcut>
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => void openSQLFile()}>
+              Import SQL…
+              <DropdownMenuShortcut>⌘O</DropdownMenuShortcut>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <Button
+          className="quiet icon"
+          aria-label="Import SQL"
+          onClick={() => void openSQLFile()}
+        >
+          <FolderOpen size={15} />
+        </Button>
+        <span className="spacer" data-tauri-drag-region />
+        <button
+          className="command-trigger"
+          onClick={() => setPaletteOpen(true)}
+          aria-keyshortcuts="Meta+K"
+        >
+          <Search size={14} aria-hidden="true" />
+          <span>Search or run a command</span>
+          <kbd aria-hidden="true">⌘K</kbd>
+        </button>
         <Button
           className="quiet icon"
           aria-label="Keyboard shortcuts"
@@ -668,16 +985,6 @@ export default function App() {
               }}
             >
               <aside className="sidebar">
-                <div className="sidebar-top">
-                  <span className="eyebrow">WORKSPACE</span>
-                  <Button
-                    className="icon quiet"
-                    aria-label="Hide sidebar"
-                    onClick={() => setSidebar(false)}
-                  >
-                    <PanelLeftClose size={15} />
-                  </Button>
-                </div>
                 <ConnectionSwitcher
                   connections={connections}
                   selected={selected}
@@ -705,167 +1012,197 @@ export default function App() {
                   onConnect={connect}
                   onDisconnect={() => void disconnect()}
                 />
-                <div className="sidebar-divider" />
-                <div className="section-label">
-                  <span>Database explorer</span>
-                  <span className="tiny-label">{catalog.length || "—"}</span>
-                </div>
                 <div className="sidebar-search">
-                  <Search size={13} />
+                  <Search size={13} aria-hidden="true" />
                   <Input
                     className="h-auto border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
-                    placeholder="Filter tables…"
+                    placeholder="Filter tables & documents"
                     aria-label="Filter tables"
                     value={search}
                     onChange={(e) => setSearch(e.target.value)}
                   />
-                  <kbd>⌕</kbd>
                 </div>
-                <div className="schema-tree">
-                  {schemas.map((schema) => (
-                    <details
-                      key={`${selected}:${schema}`}
-                      open={!explorerState.collapsed.includes(schema)}
-                      onToggle={(e) => {
-                        const collapsed = explorerState.collapsed.filter(
-                          (s) => s !== schema,
-                        );
-                        if (!e.currentTarget.open) collapsed.push(schema);
-                        if (
-                          collapsed.join("\0") !==
-                          explorerState.collapsed.join("\0")
-                        )
-                          setExplorer(selected, {
-                            ...explorerState,
-                            collapsed,
-                          });
-                      }}
-                    >
-                      <summary>
-                        <ChevronRight size={13} />
-                        <Layers size={14} />
-                        {schema}
-                        <small>
-                          {catalog.filter((r) => r.schema === schema).length}
+                <div className="sidebar-scroll">
+                  <div className="section-label">
+                    <span>Schemas</span>
+                    <span className="tiny-label">
+                      {catalog.length ? `${catalog.length} relations` : "—"}
+                    </span>
+                  </div>
+                  <div className="schema-tree">
+                    {schemas.map((schema) => (
+                      <details
+                        key={`${selected}:${schema}`}
+                        open={!explorerState.collapsed.includes(schema)}
+                        onToggle={(e) => {
+                          const collapsed = explorerState.collapsed.filter(
+                            (s) => s !== schema,
+                          );
+                          if (!e.currentTarget.open) collapsed.push(schema);
+                          if (
+                            collapsed.join("\0") !==
+                            explorerState.collapsed.join("\0")
+                          )
+                            setExplorer(selected, {
+                              ...explorerState,
+                              collapsed,
+                            });
+                        }}
+                      >
+                        <summary>
+                          <ChevronRight size={13} />
+                          {schema}
+                          <small>
+                            {catalog.filter((r) => r.schema === schema).length}
+                          </small>
+                        </summary>
+                        <div className="schema-children">
+                          {catalog
+                            .filter(
+                              (r) =>
+                                r.schema === schema &&
+                                `${r.name} ${r.columns.map((c) => c.name).join(" ")}`
+                                  .toLowerCase()
+                                  .includes(query),
+                            )
+                            .map((r) => (
+                              <ContextMenu key={r.name}>
+                                <ContextMenuTrigger
+                                  render={
+                                    <button
+                                      className={`table-entry ${tab?.relation && tab.tableKey === JSON.stringify([selected, r.schema, r.name]) ? "active" : ""}`}
+                                      title={`Open ${schema}.${r.name}`}
+                                      onClick={() => openTable(r)}
+                                    />
+                                  }
+                                >
+                                  {r.kind === "table" ? (
+                                    <Table2 size={14} aria-hidden="true" />
+                                  ) : (
+                                    <Eye size={14} aria-hidden="true" />
+                                  )}
+                                  <span>{r.name}</span>
+                                  {r.kind !== "table" ? (
+                                    <small className="kind-label">
+                                      {r.kind}
+                                    </small>
+                                  ) : (
+                                    r.estimatedRows !== undefined && (
+                                      <small
+                                        className="row-estimate"
+                                        aria-hidden="true"
+                                        title={`About ${r.estimatedRows.toLocaleString()} rows (planner estimate)`}
+                                      >
+                                        {formatEstimate(r.estimatedRows)}
+                                      </small>
+                                    )
+                                  )}
+                                </ContextMenuTrigger>
+                                <ContextMenuContent>
+                                  <ContextMenuItem
+                                    onClick={() => openTable(r, "data")}
+                                  >
+                                    Open Data
+                                  </ContextMenuItem>
+                                  <ContextMenuItem
+                                    onClick={() => openTable(r, "query")}
+                                  >
+                                    Open SQL
+                                  </ContextMenuItem>
+                                  <ContextMenuItem
+                                    onClick={() => openTable(r, "structure")}
+                                  >
+                                    View Structure
+                                  </ContextMenuItem>
+                                </ContextMenuContent>
+                              </ContextMenu>
+                            ))}
+                        </div>
+                      </details>
+                    ))}
+                    {!browseSession && (
+                      <div className="sidebar-hint">
+                        {connecting ? (
+                          "Loading schemas…"
+                        ) : selected ? (
+                          <Button className="quiet small" onClick={connect}>
+                            Connect to browse
+                          </Button>
+                        ) : (
+                          "Add a connection to browse."
+                        )}
+                      </div>
+                    )}
+                  </div>
+                  <div className="section-label">
+                    <span>Documents</span>
+                    <span className="section-actions">
+                      <Button
+                        className="quiet icon"
+                        aria-label="New SQL document"
+                        title="New SQL document"
+                        onClick={() => add("query", selected || null)}
+                      >
+                        <FilePlus2 size={14} />
+                      </Button>
+                      <Button
+                        className="quiet icon"
+                        aria-label="New notebook"
+                        title="New notebook"
+                        onClick={() => add("notebook", selected || null)}
+                      >
+                        <BookPlus size={14} />
+                      </Button>
+                    </span>
+                  </div>
+                  <div className="notebook-list" aria-label="Documents">
+                    {documents.map((d) => (
+                      <button
+                        key={d.id}
+                        className={activeId === d.id ? "active" : ""}
+                        onClick={d.open}
+                      >
+                        {d.kind === "sql" ? (
+                          <FileCode2 size={14} aria-hidden="true" />
+                        ) : (
+                          <BookOpen size={14} aria-hidden="true" />
+                        )}
+                        <span>{d.title}</span>
+                        <small aria-hidden="true">
+                          {d.kind === "sql" ? "sql" : "notebook"}
                         </small>
-                      </summary>
-                      {catalog
-                        .filter(
-                          (r) =>
-                            r.schema === schema &&
-                            `${r.name} ${r.columns.map((c) => c.name).join(" ")}`
-                              .toLowerCase()
-                              .includes(search.toLowerCase()),
-                        )
-                        .map((r) => (
-                          <ContextMenu key={r.name}>
-                            <ContextMenuTrigger
-                              render={
-                                <button
-                                  className="table-entry"
-                                  title={`Open ${schema}.${r.name}`}
-                                  onClick={() => openTable(r)}
-                                />
-                              }
-                            >
-                              <Table2 size={14} />
-                              <span>{r.name}</span>
-                              {r.kind !== "table" && <small>{r.kind}</small>}
-                            </ContextMenuTrigger>
-                            <ContextMenuContent>
-                              <ContextMenuItem
-                                onClick={() => openTable(r, "data")}
-                              >
-                                Open Data
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onClick={() => openTable(r, "query")}
-                              >
-                                Open SQL
-                              </ContextMenuItem>
-                              <ContextMenuItem
-                                onClick={() => openTable(r, "structure")}
-                              >
-                                View Structure
-                              </ContextMenuItem>
-                            </ContextMenuContent>
-                          </ContextMenu>
-                        ))}
-                    </details>
-                  ))}
-                  {!browseSession && (
-                    <div className="sidebar-hint">
-                      {connecting ? (
-                        "Loading schemas…"
-                      ) : selected ? (
-                        <Button className="quiet small" onClick={connect}>
-                          Connect to browse
-                        </Button>
-                      ) : (
-                        "Add a connection to browse."
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="sidebar-divider" />
-                <div className="section-label">
-                  <span>SQL documents</span>
-                  <Button
-                    className="quiet icon"
-                    aria-label="New SQL document"
-                    onClick={() => add("query", selected || null)}
-                  >
-                    <Plus size={15} />
-                  </Button>
-                </div>
-                <div
-                  className="notebook-list sql-library"
-                  aria-label="SQL documents"
-                >
-                  {visibleSQL.map((d) => (
-                    <button key={d.id} onClick={() => openSQL(d)}>
-                      <FileCode2 size={14} />
-                      <span>
-                        {tabs.find((t) => t.id === d.id)?.title ?? d.title}
-                      </span>
-                    </button>
-                  ))}
-                  {!visibleSQL.length && (
-                    <div className="sidebar-hint">No saved SQL documents.</div>
-                  )}
-                </div>
-                <div className="section-label">
-                  <span>Notebooks</span>
-                  <Button
-                    className="quiet icon"
-                    aria-label="New notebook"
-                    onClick={() => add("notebook", selected || null)}
-                  >
-                    <Plus size={15} />
-                  </Button>
-                </div>
-                <div className="notebook-list">
-                  {visibleNotebooks.map((n) => (
-                    <button key={n.id} onClick={() => open(n)}>
-                      <BookOpen size={14} />
-                      <span>{n.title}</span>
-                    </button>
-                  ))}
-                  {!visibleNotebooks.length && (
-                    <div className="sidebar-hint">No saved notebooks.</div>
-                  )}
+                      </button>
+                    ))}
+                    {!documents.length && (
+                      <div className="sidebar-hint">
+                        {query
+                          ? "No matching documents."
+                          : "No saved documents."}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div className="sidebar-bottom">
-                  <div className="brand-stamp">重</div>
-                  <span>
-                    PostgreSQL<small>Local workspace</small>
-                  </span>
                   <Button
-                    className="quiet icon"
+                    className="quiet settings-button justify-start"
                     aria-label="Settings"
                     onClick={() => setSettingsOpen(true)}
                   >
-                    <Settings2 size={15} />
+                    <Code2 size={15} aria-hidden="true" />
+                    Settings
+                  </Button>
+                  <Button
+                    className="quiet icon"
+                    aria-label={
+                      theme === "dark"
+                        ? "Switch to light theme"
+                        : "Switch to dark theme"
+                    }
+                    onClick={() =>
+                      setAppearance(theme === "dark" ? "light" : "dark")
+                    }
+                  >
+                    {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
                   </Button>
                 </div>
               </aside>
@@ -875,89 +1212,6 @@ export default function App() {
         )}
         <ResizablePanel id="workspace" minSize={480}>
           <main className="workspace">
-            <nav className="tabbar" aria-label="Open documents">
-              {!sidebar && (
-                <Button
-                  className="icon quiet"
-                  aria-label="Show sidebar"
-                  onClick={() => setSidebar(true)}
-                >
-                  <PanelLeftOpen size={16} />
-                </Button>
-              )}
-              {visibleTabs.map((t) => (
-                <div
-                  key={t.id}
-                  className={`tab ${activeId === t.id ? "active" : ""}`}
-                >
-                  <button onClick={() => activate(t.id)}>
-                    {t.kind === "query" ? (
-                      <FileCode2 size={14} />
-                    ) : (
-                      <BookOpen size={14} />
-                    )}
-                    <span>{t.title}</span>
-                    {t.dirty && !t.relation && <span className="dirty-dot" />}
-                  </button>
-                  <Button
-                    className="quiet icon"
-                    aria-label={`Close ${t.title}`}
-                    onClick={() => closeTab(t)}
-                  >
-                    <X size={12} />
-                  </Button>
-                </div>
-              ))}
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={
-                    <Button
-                      className="quiet icon new-tab"
-                      aria-label="New document"
-                    />
-                  }
-                >
-                  <Plus size={16} />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="start">
-                  <DropdownMenuItem
-                    onClick={() => add("query", selected || null)}
-                  >
-                    SQL document<DropdownMenuShortcut>⌘T</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    onClick={() => add("notebook", selected || null)}
-                  >
-                    Notebook<DropdownMenuShortcut>⌘⇧T</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => void openSQLFile()}>
-                    Import SQL…
-                    <DropdownMenuShortcut>⌘O</DropdownMenuShortcut>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-              <span className="spacer" />
-              <Button
-                className="quiet icon tabbar-action"
-                aria-label="Import SQL"
-                onClick={() => void openSQLFile()}
-              >
-                <FolderOpen size={16} />
-              </Button>
-              <span className="local-badge">LOCAL WORKSPACE</span>
-            </nav>
-            {notice && (
-              <div className="notice" role="status">
-                <span>{notice}</span>
-                <Button
-                  className="quiet icon"
-                  aria-label="Dismiss notice"
-                  onClick={() => setNotice("")}
-                >
-                  <X size={13} />
-                </Button>
-              </div>
-            )}
             {!native && (
               <div className="desktop-note">
                 Desktop services are unavailable in a browser. Launch with{" "}
@@ -967,7 +1221,7 @@ export default function App() {
             {!tab ? (
               <div className="welcome">
                 <div className="welcome-mark">
-                  <Layers size={44} strokeWidth={1} />
+                  <Database size={40} strokeWidth={1} />
                   <span>重ね</span>
                 </div>
                 <span className="eyebrow">POSTGRESQL WORKSPACE</span>
@@ -983,7 +1237,6 @@ export default function App() {
                   >
                     <Database size={15} />
                     Add a connection
-                    <ArrowUpRight size={14} />
                   </Button>
                   <Button onClick={() => add("notebook", selected || null)}>
                     <BookOpen size={15} />
@@ -991,15 +1244,140 @@ export default function App() {
                   </Button>
                 </div>
                 <div className="welcome-footnote">
+                  <kbd>⌘ K</kbd> search<span>·</span>
                   <kbd>⌘ T</kbd> new SQL document<span>·</span>
                   <kbd>⌘ ⇧ T</kbd> new notebook
                 </div>
               </div>
+            ) : tab.relation ? (
+              <>
+                <Tabs
+                  value={tab.view ?? "data"}
+                  onValueChange={(view) =>
+                    patch(tab.id, (t) => ({
+                      ...t,
+                      view: view as "data" | "structure",
+                    }))
+                  }
+                  className="table-view-switch"
+                >
+                  <h1
+                    className="relation-title"
+                    title={`${activeConnection?.database ?? ""} / ${tab.relation.schema}.${tab.relation.name}`}
+                  >
+                    <span>{tab.relation.schema}.</span>
+                    {tab.relation.name}
+                  </h1>
+                  <span className="relation-meta">
+                    {tab.relation.kind} · {tab.relation.columns.length}{" "}
+                    {tab.relation.columns.length === 1 ? "column" : "columns"}
+                  </span>
+                  <TabsList>
+                    <TabsTrigger value="data">Data</TabsTrigger>
+                    <TabsTrigger value="structure">Structure</TabsTrigger>
+                  </TabsList>
+                  <span className="spacer" />
+                  {tab.disconnected && (
+                    <Button
+                      className="quiet"
+                      disabled={running}
+                      onClick={() => void reconnect(tab)}
+                    >
+                      Reconnect session
+                    </Button>
+                  )}
+                  {tab.view === "data" && (
+                    <Button
+                      className="quiet"
+                      aria-label="Filter rows"
+                      aria-expanded={!!tab.filtersOpen}
+                      onClick={() =>
+                        patch(tab.id, (t) => ({
+                          ...t,
+                          filtersOpen: !t.filtersOpen,
+                        }))
+                      }
+                    >
+                      <Filter size={14} />
+                      Filter
+                      {tab.tableSettings?.filterColumn && (
+                        <span className="filter-count">1</span>
+                      )}
+                    </Button>
+                  )}
+                  <Button onClick={() => openTable(tab.relation!, "query")}>
+                    <FileCode2 size={14} />
+                    Open as SQL
+                  </Button>
+                  {tab.view === "data" &&
+                    (running ? (
+                      <Button className="danger" onClick={() => cancel(tab)}>
+                        <Square size={12} />
+                        Cancel
+                      </Button>
+                    ) : (
+                      <Button
+                        className="icon"
+                        aria-label="Refresh table data"
+                        onClick={() => refreshTable(tab)}
+                      >
+                        <RefreshCw size={14} />
+                      </Button>
+                    ))}
+                </Tabs>
+                {tab.view === "structure" ? (
+                  <div className="structure-view">
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Column</th>
+                          <th>Type</th>
+                          <th>Nullable</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {tab.relation.columns.map((c) => (
+                          <tr key={c.name}>
+                            <td>
+                              {c.name}
+                              {c.primaryKeyPosition !== undefined && (
+                                <KeyRound
+                                  size={12}
+                                  className="pk-icon"
+                                  aria-label="Primary key"
+                                />
+                              )}
+                            </td>
+                            <td>{c.type}</td>
+                            <td>{c.required ? "No" : "Yes"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <TableBrowser
+                    key={tab.id}
+                    tab={tab}
+                    onExecute={(settings) => void runTable(tab, settings)}
+                    onCount={() => void countTable(tab)}
+                  />
+                )}
+              </>
             ) : (
               <>
-                {tab.kind === "query" && !tab.relation && (
-                  <div className="sql-document-heading">
+                <div className="document-toolbar">
+                  <span className="breadcrumb">
+                    <span>{activeConnection?.database ?? "Local drafts"}</span>
+                    <span aria-hidden="true">/</span>
+                    <span>
+                      {tab.kind === "notebook" ? "Notebooks" : "SQL documents"}
+                    </span>
+                    <span aria-hidden="true">/</span>
+                  </span>
+                  {tab.kind === "query" ? (
                     <Input
+                      className="document-title-input"
                       aria-label="SQL document title"
                       value={tab.title}
                       maxLength={200}
@@ -1011,239 +1389,91 @@ export default function App() {
                         }))
                       }
                     />
-                    <small>
+                  ) : (
+                    <strong className="breadcrumb-current">{tab.title}</strong>
+                  )}
+                  <span
+                    className={`session-pill ${sessionState(tab).tone}`}
+                    role="status"
+                  >
+                    {sessionState(tab).label}
+                  </span>
+                  {tab.kind === "query" && (
+                    <small className="save-state">
                       {tab.dirty ? "Unsaved changes" : "Saved locally"}
                     </small>
+                  )}
+                  <span className="spacer" />
+                  {tab.kind === "query" && (
                     <Button
-                      className="quiet small"
+                      className="quiet"
                       onClick={() => void exportSQL(tab)}
                     >
                       Export SQL
                     </Button>
-                  </div>
-                )}
-                {(!tab.relation || tab.disconnected) && (
-                  <div className="document-toolbar">
-                    {!tab.relation && (
-                      <div className="document-context">
-                        <span className="context-dot" />
-                        <span title={activeConnection?.name}>
-                          {activeConnection?.database ?? "Local drafts"}
-                        </span>
-                      </div>
-                    )}
-                    <span className="toolbar-caption">
-                      {tab.kind === "notebook"
-                        ? "Dedicated notebook session"
-                        : tab.relation
-                          ? "Table session"
-                          : "Query session"}
-                      {tab.sessionId ? " · connected" : ""}
-                    </span>
-                    <span className="spacer" />
-                    {tab.disconnected && (
-                      <Button
-                        className="quiet"
-                        disabled={running}
-                        onClick={async () => {
-                          try {
-                            if (tab.sessionId)
-                              await api.close(tab.sessionId).catch(() => {});
-                            const t = {
-                              ...tab,
-                              sessionId: undefined,
-                              disconnected: false,
-                            };
-                            await sessionFor(t);
-                            patch(tab.id, (x) => ({
-                              ...mutateCells(x, x.cells),
-                              disconnected: false,
-                            }));
-                          } catch (e) {
-                            setNotice(asError(e).message);
-                          }
-                        }}
-                      >
-                        Reconnect session
-                      </Button>
-                    )}
-                    {tab.sessionId && !tab.disconnected && !tab.relation && (
-                      <Button
-                        className="quiet"
-                        disabled={running}
-                        onClick={async () => {
-                          await api.close(tab.sessionId!);
-                          patch(tab.id, (t) => ({
-                            ...mutateCells(t, t.cells),
-                            sessionId: undefined,
-                          }));
-                        }}
-                      >
-                        Reset session
-                      </Button>
-                    )}
-                    {!tab.relation && (
-                      <Button className="quiet" onClick={() => save(tab)}>
-                        <Save size={14} />
-                        Save<kbd>⌘S</kbd>
-                      </Button>
-                    )}
-                    {running ? (
-                      <Button className="danger" onClick={() => cancel(tab)}>
-                        <Square size={12} />
-                        Cancel
-                      </Button>
-                    ) : tab.relation && tab.view !== "query" ? null : (
-                      <Button
-                        className="primary"
-                        disabled={!tab.connectionId || tab.view === "structure"}
-                        onClick={() =>
-                          runCells(
-                            tab,
-                            tab.kind === "query"
-                              ? [tab.cells[0].id]
-                              : tab.cells
-                                  .filter((c) => c.kind === "sql")
-                                  .map((c) => c.id),
-                          )
-                        }
-                      >
-                        <Play size={12} fill="currentColor" />
-                        {tab.kind === "query" ? "Run query" : "Run all"}
-                        {tab.kind === "query" && <kbd>⌘↵</kbd>}
-                      </Button>
-                    )}
-                  </div>
-                )}
+                  )}
+                  {tab.disconnected && (
+                    <Button
+                      className="quiet"
+                      disabled={running}
+                      onClick={() => void reconnect(tab)}
+                    >
+                      Reconnect session
+                    </Button>
+                  )}
+                  {tab.sessionId && !tab.disconnected && (
+                    <Button
+                      className="quiet"
+                      disabled={running}
+                      onClick={() => void resetSession(tab)}
+                    >
+                      Reset session
+                    </Button>
+                  )}
+                  <Button onClick={() => save(tab)}>
+                    <Save size={14} />
+                    Save<kbd aria-hidden="true">⌘S</kbd>
+                  </Button>
+                  {running ? (
+                    <Button className="danger" onClick={() => cancel(tab)}>
+                      <Square size={12} />
+                      Cancel
+                    </Button>
+                  ) : (
+                    <Button
+                      className="primary"
+                      disabled={!tab.connectionId}
+                      onClick={() => runAll(tab)}
+                    >
+                      <Play size={12} fill="currentColor" />
+                      {tab.kind === "query" ? "Run query" : "Run all"}
+                      <kbd aria-hidden="true">
+                        {tab.kind === "query" ? "⌘↵" : "⇧⌘↵"}
+                      </kbd>
+                    </Button>
+                  )}
+                </div>
                 {tab.kind === "query" ? (
-                  <>
-                    {tab.relation && (
-                      <Tabs
-                        value={tab.view ?? "data"}
-                        onValueChange={(view) =>
-                          patch(tab.id, (t) => ({
-                            ...t,
-                            view: view as "data" | "structure",
-                          }))
-                        }
-                        className="table-view-switch"
-                      >
-                        <TabsList>
-                          <TabsTrigger value="data">Data</TabsTrigger>
-                          <TabsTrigger value="structure">Structure</TabsTrigger>
-                        </TabsList>
-                        <span className="table-breadcrumb">
-                          {activeConnection?.database} / {tab.relation.schema}.
-                          {tab.relation.name}
-                        </span>
-                        {tab.view === "data" && (
-                          <>
-                            <Button
-                              className="quiet small"
-                              aria-label="Filter rows"
-                              aria-expanded={!!tab.filtersOpen}
-                              onClick={() =>
-                                patch(tab.id, (t) => ({
-                                  ...t,
-                                  filtersOpen: !t.filtersOpen,
-                                }))
-                              }
-                            >
-                              <ListFilter size={14} />
-                              Filter
-                              {tab.tableSettings?.filterColumn && (
-                                <span className="filter-count">1</span>
-                              )}
-                            </Button>
-                            {running ? (
-                              <Button
-                                className="danger small"
-                                onClick={() => cancel(tab)}
-                              >
-                                <Square size={12} />
-                                Cancel
-                              </Button>
-                            ) : (
-                              <Button
-                                className="quiet icon"
-                                aria-label="Refresh table data"
-                                onClick={() =>
-                                  void runTable(
-                                    tab,
-                                    tab.tableSettings ?? {
-                                      filterColumn: "",
-                                      filterOperator: "contains",
-                                      filterValue: "",
-                                    },
-                                  )
-                                }
-                              >
-                                <RefreshCw size={14} />
-                              </Button>
-                            )}
-                          </>
-                        )}
-                      </Tabs>
-                    )}
-                    {tab.view === "structure" && tab.relation ? (
-                      <div className="structure-view">
-                        <h2>{tab.relation.name}</h2>
-                        <p>
-                          {tab.relation.schema} · {tab.relation.kind}
-                        </p>
-                        <table>
-                          <thead>
-                            <tr>
-                              <th>Column</th>
-                              <th>Type</th>
-                              <th>Nullable</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tab.relation.columns.map((c) => (
-                              <tr key={c.name}>
-                                <td>{c.name}</td>
-                                <td>{c.type}</td>
-                                <td>{c.required ? "No" : "Yes"}</td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    ) : tab.view === "data" && tab.relation ? (
-                      <TableBrowser
-                        key={tab.id}
-                        tab={tab}
-                        onExecute={(settings) => void runTable(tab, settings)}
-                        onCount={() => void countTable(tab)}
-                      />
-                    ) : (
-                      <QueryPane
-                        key={tab.id}
-                        source={tab.cells[0].source}
-                        onChange={(v) => editCell(tab.id, tab.cells[0].id, v)}
-                        onRun={() => runCells(tab, [tab.cells[0].id])}
-                        catalog={currentCatalog}
-                        height={tab.editorHeight}
-                        onResize={(editorHeight) =>
-                          patch(tab.id, (t) => ({ ...t, editorHeight }))
-                        }
-                      >
-                        <ExecutionView
-                          execution={tab.executions[tab.cells[0].id]}
-                        />
-                      </QueryPane>
-                    )}
-                  </>
+                  <QueryPane
+                    key={tab.id}
+                    source={tab.cells[0].source}
+                    onChange={(v) => editCell(tab.id, tab.cells[0].id, v)}
+                    onRun={() => runCells(tab, [tab.cells[0].id])}
+                    catalog={currentCatalog}
+                    height={tab.editorHeight}
+                    onResize={(editorHeight) =>
+                      patch(tab.id, (t) => ({ ...t, editorHeight }))
+                    }
+                  >
+                    <ExecutionView
+                      execution={tab.executions[tab.cells[0].id]}
+                    />
+                  </QueryPane>
                 ) : (
                   <div className="notebook-document">
                     <div className="notebook-heading">
-                      <span className="eyebrow">
-                        <BookOpen size={13} />
-                        NOTEBOOK
-                      </span>
                       <Input
-                        className="notebook-title h-auto rounded-none border-0 bg-transparent p-0 text-[2.6rem] md:text-[2.6rem] leading-tight shadow-none focus-visible:ring-0"
+                        className="notebook-title h-auto rounded-none border-0 bg-transparent dark:bg-transparent p-0 text-[2.4rem] md:text-[2.4rem] leading-tight shadow-none focus-visible:ring-0"
                         aria-label="Notebook title"
                         value={tab.title}
                         onChange={(e) =>
@@ -1255,196 +1485,212 @@ export default function App() {
                         }
                       />
                       <p>
-                        {activeConnection?.database ?? "Offline"}
+                        {tab.cells.length}{" "}
+                        {tab.cells.length === 1 ? "cell" : "cells"}
                         <span>·</span>
-                        {tab.cells.length} cells<span>·</span>
-                        {tab.dirty ? "Unsaved changes" : "Saved locally"}
+                        shared session<span>·</span>
+                        <span className={tab.dirty ? "unsaved" : ""}>
+                          {tab.dirty ? "Unsaved changes" : "Saved locally"}
+                        </span>
                       </p>
                     </div>
                     <div className="notebook-cells">
-                      {tab.cells.map((cell, index) => (
-                        <section
-                          key={cell.id}
-                          className={`notebook-cell ${focusedCell === cell.id ? "focused" : ""}`}
-                          onFocus={() => setFocusedCell(cell.id)}
-                        >
-                          <div className="cell-gutter">
-                            <span>{String(index + 1).padStart(2, "0")}</span>
-                            {cell.kind === "sql" ? (
-                              <FileCode2 size={14} />
-                            ) : (
-                              <FileText size={14} />
-                            )}
-                          </div>
-                          <div className="cell-main">
-                            <div className="cell-toolbar">
-                              <span className="eyebrow">
-                                {cell.kind === "sql" ? "SQL" : "MARKDOWN"}
-                              </span>
-                              {cell.kind === "sql" &&
-                                tab.executions[cell.id]?.state === "success" &&
-                                !tab.executions[cell.id]?.outdated && (
-                                  <span className="cell-complete">
-                                    <Check size={11} />
-                                    Complete
+                      {tab.cells.map((cell, index) => {
+                        const execution = tab.executions[cell.id];
+                        const complete =
+                          execution?.state === "success" && !execution.outdated;
+                        return (
+                          <section
+                            key={cell.id}
+                            className={`notebook-cell ${cell.kind} ${focusedCell === cell.id ? "focused" : ""}`}
+                            onFocus={() => setFocusedCell(cell.id)}
+                          >
+                            <div className="cell-gutter">
+                              {cell.kind === "sql" && (
+                                <>
+                                  <Button
+                                    className={`run-cell ${focusedCell === cell.id ? "primary" : ""}`}
+                                    aria-label="Run cell"
+                                    title="Run cell (⌘↵)"
+                                    disabled={running || !tab.connectionId}
+                                    onClick={() => runCells(tab, [cell.id])}
+                                  >
+                                    <Play size={11} fill="currentColor" />
+                                  </Button>
+                                  <span
+                                    className={`run-number ${complete ? "cell-complete" : ""} ${execution?.state === "failed" ? "failed" : ""}`}
+                                    title={
+                                      complete
+                                        ? "Complete"
+                                        : execution?.outdated
+                                          ? "Outdated"
+                                          : undefined
+                                    }
+                                  >
+                                    [
+                                    {execution?.state === "running"
+                                      ? "*"
+                                      : (execution?.runNumber ?? " ")}
+                                    ]
                                   </span>
+                                </>
+                              )}
+                            </div>
+                            <div className="cell-main">
+                              <div className="cell-toolbar">
+                                <span className="eyebrow">
+                                  {cell.kind === "sql" ? "SQL" : "MARKDOWN"}
+                                </span>
+                                {cell.kind === "markdown" && (
+                                  <Button
+                                    className="quiet small"
+                                    onClick={() =>
+                                      setMarkdownEditing(
+                                        markdownEditing === cell.id
+                                          ? null
+                                          : cell.id,
+                                      )
+                                    }
+                                  >
+                                    {markdownEditing === cell.id
+                                      ? "Done"
+                                      : "Edit"}
+                                  </Button>
                                 )}
-                              <span className="spacer" />
-                              {cell.kind === "markdown" && (
                                 <Button
-                                  className="quiet small"
+                                  className="quiet icon"
+                                  aria-label={`Move cell ${index + 1} up`}
+                                  disabled={index === 0 || running}
                                   onClick={() =>
-                                    setMarkdownEditing(
-                                      markdownEditing === cell.id
-                                        ? null
-                                        : cell.id,
+                                    patch(tab.id, (t) => {
+                                      const cells = [...t.cells];
+                                      [cells[index - 1], cells[index]] = [
+                                        cells[index],
+                                        cells[index - 1],
+                                      ];
+                                      return mutateCells(t, cells);
+                                    })
+                                  }
+                                >
+                                  <ArrowUp size={13} />
+                                </Button>
+                                <Button
+                                  className="quiet icon"
+                                  aria-label={`Move cell ${index + 1} down`}
+                                  disabled={
+                                    index === tab.cells.length - 1 || running
+                                  }
+                                  onClick={() =>
+                                    patch(tab.id, (t) => {
+                                      const cells = [...t.cells];
+                                      [cells[index], cells[index + 1]] = [
+                                        cells[index + 1],
+                                        cells[index],
+                                      ];
+                                      return mutateCells(t, cells);
+                                    })
+                                  }
+                                >
+                                  <ArrowDown size={13} />
+                                </Button>
+                                <Button
+                                  className="quiet icon"
+                                  aria-label={`Delete cell ${index + 1}`}
+                                  disabled={running}
+                                  onClick={() =>
+                                    patch(tab.id, (t) =>
+                                      mutateCells(
+                                        t,
+                                        t.cells.filter((c) => c.id !== cell.id),
+                                      ),
                                     )
                                   }
                                 >
-                                  {markdownEditing === cell.id
-                                    ? "Done"
-                                    : "Edit"}
+                                  <Trash2 size={13} />
                                 </Button>
-                              )}
-                              <Button
-                                className="quiet icon"
-                                aria-label={`Move cell ${index + 1} up`}
-                                disabled={index === 0 || running}
-                                onClick={() =>
-                                  patch(tab.id, (t) => {
-                                    const cells = [...t.cells];
-                                    [cells[index - 1], cells[index]] = [
-                                      cells[index],
-                                      cells[index - 1],
-                                    ];
-                                    return mutateCells(t, cells);
-                                  })
-                                }
-                              >
-                                <ArrowUp size={13} />
-                              </Button>
-                              <Button
-                                className="quiet icon"
-                                aria-label={`Move cell ${index + 1} down`}
-                                disabled={
-                                  index === tab.cells.length - 1 || running
-                                }
-                                onClick={() =>
-                                  patch(tab.id, (t) => {
-                                    const cells = [...t.cells];
-                                    [cells[index], cells[index + 1]] = [
-                                      cells[index + 1],
-                                      cells[index],
-                                    ];
-                                    return mutateCells(t, cells);
-                                  })
-                                }
-                              >
-                                <ArrowDown size={13} />
-                              </Button>
-                              <Button
-                                className="quiet icon"
-                                aria-label={`Delete cell ${index + 1}`}
-                                disabled={running}
-                                onClick={() =>
-                                  patch(tab.id, (t) =>
-                                    mutateCells(
-                                      t,
-                                      t.cells.filter((c) => c.id !== cell.id),
-                                    ),
-                                  )
-                                }
-                              >
-                                <Trash2 size={13} />
-                              </Button>
-                              {cell.kind === "sql" && (
-                                <Button
-                                  className="quiet small run-cell"
-                                  disabled={running || !tab.connectionId}
-                                  onClick={() => runCells(tab, [cell.id])}
+                              </div>
+                              {cell.kind === "sql" ? (
+                                <>
+                                  <SqlEditor
+                                    compact
+                                    value={cell.source}
+                                    onChange={(v) =>
+                                      editCell(tab.id, cell.id, v)
+                                    }
+                                    onRun={() => runCells(tab, [cell.id])}
+                                    catalog={currentCatalog}
+                                  />
+                                  {execution && (
+                                    <ExecutionView
+                                      compact
+                                      execution={execution}
+                                    />
+                                  )}
+                                </>
+                              ) : markdownEditing === cell.id ? (
+                                <Textarea
+                                  autoFocus
+                                  aria-label={`Markdown cell ${index + 1}`}
+                                  className="markdown-editor"
+                                  value={cell.source}
+                                  onChange={(e) =>
+                                    editCell(tab.id, cell.id, e.target.value)
+                                  }
+                                  onKeyDown={(e) => {
+                                    if (
+                                      (e.metaKey || e.ctrlKey) &&
+                                      e.key === "Enter"
+                                    ) {
+                                      e.preventDefault();
+                                      setMarkdownEditing(null);
+                                    }
+                                  }}
+                                />
+                              ) : (
+                                <div
+                                  className="markdown-content"
+                                  onDoubleClick={() =>
+                                    setMarkdownEditing(cell.id)
+                                  }
                                 >
-                                  <Play size={11} />
-                                  Run cell
-                                </Button>
+                                  <ReactMarkdown
+                                    allowedElements={[
+                                      "h1",
+                                      "h2",
+                                      "h3",
+                                      "h4",
+                                      "p",
+                                      "strong",
+                                      "em",
+                                      "code",
+                                      "pre",
+                                      "ul",
+                                      "ol",
+                                      "li",
+                                      "blockquote",
+                                      "hr",
+                                      "a",
+                                      "br",
+                                      "del",
+                                    ]}
+                                    unwrapDisallowed
+                                    components={{
+                                      a: ({ children }) => (
+                                        <span className="markdown-link">
+                                          {children}
+                                        </span>
+                                      ),
+                                    }}
+                                  >
+                                    {cell.source ||
+                                      "Double-click to write a note…"}
+                                  </ReactMarkdown>
+                                </div>
                               )}
                             </div>
-                            {cell.kind === "sql" ? (
-                              <>
-                                <SqlEditor
-                                  compact
-                                  value={cell.source}
-                                  onChange={(v) => editCell(tab.id, cell.id, v)}
-                                  onRun={() => runCells(tab, [cell.id])}
-                                  catalog={currentCatalog}
-                                />
-                                <ExecutionView
-                                  compact
-                                  execution={tab.executions[cell.id]}
-                                />
-                              </>
-                            ) : markdownEditing === cell.id ? (
-                              <Textarea
-                                autoFocus
-                                aria-label={`Markdown cell ${index + 1}`}
-                                className="markdown-editor"
-                                value={cell.source}
-                                onChange={(e) =>
-                                  editCell(tab.id, cell.id, e.target.value)
-                                }
-                                onKeyDown={(e) => {
-                                  if (
-                                    (e.metaKey || e.ctrlKey) &&
-                                    e.key === "Enter"
-                                  ) {
-                                    e.preventDefault();
-                                    setMarkdownEditing(null);
-                                  }
-                                }}
-                              />
-                            ) : (
-                              <div
-                                className="markdown-content"
-                                onDoubleClick={() =>
-                                  setMarkdownEditing(cell.id)
-                                }
-                              >
-                                <ReactMarkdown
-                                  allowedElements={[
-                                    "h1",
-                                    "h2",
-                                    "h3",
-                                    "h4",
-                                    "p",
-                                    "strong",
-                                    "em",
-                                    "code",
-                                    "pre",
-                                    "ul",
-                                    "ol",
-                                    "li",
-                                    "blockquote",
-                                    "hr",
-                                    "a",
-                                    "br",
-                                    "del",
-                                  ]}
-                                  unwrapDisallowed
-                                  components={{
-                                    a: ({ children }) => (
-                                      <span className="markdown-link">
-                                        {children}
-                                      </span>
-                                    ),
-                                  }}
-                                >
-                                  {cell.source ||
-                                    "Double-click to write a note…"}
-                                </ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                        </section>
-                      ))}
+                          </section>
+                        );
+                      })}
                     </div>
                     <div className="add-cell">
                       <span />
@@ -1470,19 +1716,78 @@ export default function App() {
                 )}
               </>
             )}
-            <footer className="workspace-footer">
-              <span
-                className={`status-dot ${browseSession ? "" : "offline"}`}
-              />
-              {browseSession ? "Browser connected" : "Local workspace"}
-              <span className="spacer" />
-              <span>⌘ Enter to run</span>
-              <span className="footer-separator" />
-              PostgreSQL
-            </footer>
           </main>
         </ResizablePanel>
       </ResizablePanelGroup>
+      <footer className="workspace-footer">
+        <span
+          className={`status-dot ${browseSession ? "" : connecting ? "busy" : "offline"}`}
+          aria-hidden="true"
+        />
+        <span>
+          {browseSession
+            ? "Connected"
+            : connecting
+              ? "Connecting…"
+              : activeWorkspace
+                ? "Disconnected"
+                : "No connection"}
+        </span>
+        {activeWorkspace && (
+          <span className="mono">
+            {activeWorkspace.username}@{activeWorkspace.host}:
+            {activeWorkspace.port}/{activeWorkspace.database}
+          </span>
+        )}
+        <span className="spacer" />
+        {tab && !tab.relation && (
+          <span>
+            {tab.kind === "notebook" ? "Notebook" : "Query"} session ·{" "}
+            {sessionState(tab).label.toLowerCase()}
+          </span>
+        )}
+        {tab?.relation && <span>Table session · read-only</span>}
+        <span className="footer-separator" />
+        <span>UTC</span>
+        <span className="footer-separator" />
+        <span>PostgreSQL</span>
+      </footer>
+      <div className="toasts" aria-live="polite">
+        {notice && (
+          <div className="toast" role="status">
+            <span>{notice}</span>
+            <Button
+              className="quiet icon"
+              aria-label="Dismiss notice"
+              onClick={() => setNotice("")}
+            >
+              <X size={13} />
+            </Button>
+          </div>
+        )}
+        {flash && (
+          <div className="toast success" role="status">
+            <Check size={14} aria-hidden="true" />
+            <span>{flash}</span>
+            <Button
+              className="quiet icon"
+              aria-label={notice ? "Dismiss message" : "Dismiss notice"}
+              onClick={() => setFlash("")}
+            >
+              <X size={13} />
+            </Button>
+          </div>
+        )}
+      </div>
+      <CommandPalette
+        open={paletteOpen}
+        onOpenChange={setPaletteOpen}
+        relations={catalog}
+        documents={allDocuments}
+        actions={paletteActions}
+        workspaceName={activeWorkspace?.name}
+        onOpenRelation={(r) => openTable(r)}
+      />
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       {connectionDialog && (
         <ConnectionDialog
@@ -1495,7 +1800,7 @@ export default function App() {
       )}
       {help && (
         <div className="help-popover">
-          <strong>Make yourself at home</strong>
+          <strong>Keyboard shortcuts</strong>
           <Button
             className="quiet icon"
             aria-label="Close keyboard shortcuts"
@@ -1504,9 +1809,11 @@ export default function App() {
             <X size={13} />
           </Button>
           {[
+            ["⌘ K", "Search or run a command"],
             ["⌘ T", "New SQL document"],
             ["⌘ ⇧ T", "New notebook"],
             ["⌘ Enter", "Run SQL cell or query"],
+            ["⌘ ⇧ Enter", "Run all notebook cells"],
             ["⌘ S", "Save document"],
             ["⌘ O", "Import SQL"],
             ["⌘ ,", "Settings"],
@@ -1514,7 +1821,7 @@ export default function App() {
             ["⌘ \\", "Toggle sidebar"],
             ["⇧ Arrows", "Extend grid selection"],
             ["⌘ C", "Copy selected cells"],
-            ["Enter", "Inspect selected cell"],
+            ["Enter", "Inspect selected row"],
           ].map(([k, v]) => (
             <div key={k}>
               <span>{v}</span>
@@ -1525,4 +1832,10 @@ export default function App() {
       )}
     </div>
   );
+}
+function formatEstimate(n: number) {
+  if (n < 1000) return String(n);
+  if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
 }

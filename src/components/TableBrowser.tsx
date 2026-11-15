@@ -1,7 +1,14 @@
 import { SelectField } from "./SelectField";
 import { Input } from "./ui/input";
 import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronsLeft, X } from "lucide-react";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  Filter,
+  Lock,
+  X,
+} from "lucide-react";
 import { Button } from "./Button";
 import { ExecutionView } from "./ExecutionView";
 import {
@@ -61,106 +68,115 @@ export function TableBrowser({
     };
     onExecute(next);
   }
+  const operatorLabel = {
+    contains: "contains",
+    equals: "equals",
+    "is-null": "is null",
+  }[settings.filterOperator];
+  function clearFilter() {
+    const next = { ...defaultTableSettings, sort: settings.sort };
+    setDraft(next);
+    onExecute(next);
+  }
   return (
     <div className="table-browser">
-      {tab.filtersOpen && (
-        <form
-          className="table-filters"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onExecute({ ...draft, page: 0, sort: settings.sort });
-          }}
-        >
-          <span>Filter</span>
-          <SelectField
-            label="Filter column"
-            disabled={running}
-            value={draft.filterColumn}
-            onChange={(filterColumn) => setDraft({ ...draft, filterColumn })}
-            options={[
-              { value: "", label: "Choose column" },
-              ...tab.relation!.columns.map((c) => ({
-                value: c.name,
-                label: c.name,
-              })),
-            ]}
-          />
-          <SelectField
-            label="Filter operator"
-            disabled={running}
-            value={draft.filterOperator}
-            onChange={(filterOperator) =>
-              setDraft({
-                ...draft,
-                filterOperator:
-                  filterOperator as TableSettings["filterOperator"],
-              })
-            }
-            options={[
-              { value: "contains", label: "contains" },
-              { value: "equals", label: "equals" },
-              { value: "is-null", label: "is null" },
-            ]}
-          />
-          {draft.filterOperator !== "is-null" && (
-            <Input
-              aria-label="Filter value"
-              placeholder="Value"
+      <div className="table-toolbar">
+        {tab.filtersOpen ? (
+          <form
+            className="table-filters"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onExecute({ ...draft, page: 0, sort: settings.sort });
+            }}
+          >
+            <Filter size={14} aria-hidden="true" />
+            <SelectField
+              label="Filter column"
               disabled={running}
-              value={draft.filterValue}
-              onChange={(e) =>
-                setDraft({ ...draft, filterValue: e.target.value })
-              }
+              value={draft.filterColumn}
+              onChange={(filterColumn) => setDraft({ ...draft, filterColumn })}
+              options={[
+                { value: "", label: "Choose column" },
+                ...tab.relation!.columns.map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                })),
+              ]}
             />
-          )}
-          <Button type="submit" disabled={running || !draft.filterColumn}>
-            Apply
-          </Button>
-          {settings.filterColumn && (
-            <Button
-              className="quiet icon"
-              aria-label="Clear filter"
+            <SelectField
+              label="Filter operator"
               disabled={running}
-              onClick={() => {
-                const next = {
-                  ...defaultTableSettings,
-                  sort: settings.sort,
-                };
-                setDraft(next);
-                onExecute(next);
-              }}
-            >
-              <X size={13} />
+              value={draft.filterOperator}
+              onChange={(filterOperator) =>
+                setDraft({
+                  ...draft,
+                  filterOperator:
+                    filterOperator as TableSettings["filterOperator"],
+                })
+              }
+              options={[
+                { value: "contains", label: "contains" },
+                { value: "equals", label: "equals" },
+                { value: "is-null", label: "is null" },
+              ]}
+            />
+            {draft.filterOperator !== "is-null" && (
+              <Input
+                aria-label="Filter value"
+                placeholder="Value"
+                disabled={running}
+                value={draft.filterValue}
+                onChange={(e) =>
+                  setDraft({ ...draft, filterValue: e.target.value })
+                }
+              />
+            )}
+            <Button type="submit" disabled={running || !draft.filterColumn}>
+              Apply
             </Button>
-          )}
-        </form>
-      )}
-      {!execution && (tab.restored || !autoPreview) ? (
-        <div className="execution-empty">
-          <span>{tab.restored ? "Table restored." : "Table ready."}</span>
-          <small>Refresh to load current data.</small>
-        </div>
-      ) : (
-        <ExecutionView
-          execution={execution}
-          rowOffset={page * pageSize}
-          sort={settings.sort}
-          onSort={running ? undefined : sort}
-        />
-      )}
-      {validCount && count?.state === "failed" && (
-        <div className="table-count-error" role="alert">
-          Count failed: {count.error?.message}
-        </div>
-      )}
-      <div className="table-pagination" aria-label="Table pagination">
-        <span className="page-range" aria-live="polite">
-          {fetched
-            ? `${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + fetched).toLocaleString()}`
-            : "0 rows"}
-          {total !== undefined &&
-            total !== null &&
-            ` of ${BigInt(total).toLocaleString()} rows`}
+            {settings.filterColumn && (
+              <Button
+                className="quiet icon"
+                aria-label="Clear filter"
+                disabled={running}
+                onClick={clearFilter}
+              >
+                <X size={13} />
+              </Button>
+            )}
+          </form>
+        ) : (
+          <span className="filter-summary">
+            {settings.filterColumn ? (
+              <>
+                <Filter size={13} aria-hidden="true" />
+                <code>{settings.filterColumn}</code> {operatorLabel}
+                {settings.filterOperator !== "is-null" && (
+                  <code>{settings.filterValue}</code>
+                )}
+              </>
+            ) : (
+              "All rows"
+            )}
+            {settings.sort && (
+              <>
+                <span aria-hidden="true">·</span>
+                sorted by <code>{settings.sort.column}</code>{" "}
+                {settings.sort.direction === "asc" ? "↑" : "↓"}
+              </>
+            )}
+          </span>
+        )}
+        <span className="spacer" />
+        <span className="row-count" aria-live="polite">
+          {total != null ? (
+            <>
+              <strong>{BigInt(total).toLocaleString()}</strong>{" "}
+              {settings.filterColumn ? "rows match" : "rows"}
+            </>
+          ) : count?.state === "running" ? (
+            "Counting…"
+          ) : null}
         </span>
         <Button
           className="quiet small"
@@ -174,7 +190,40 @@ export function TableBrowser({
               ? "Recount"
               : "Count rows"}
         </Button>
+      </div>
+      {!execution && (tab.restored || !autoPreview) ? (
+        <div className="execution-empty">
+          <span>{tab.restored ? "Table restored." : "Table ready."}</span>
+          <small>Refresh to load current data.</small>
+        </div>
+      ) : (
+        <ExecutionView
+          execution={execution}
+          relation={tab.relation}
+          rowOffset={page * pageSize}
+          sort={settings.sort}
+          onSort={running ? undefined : sort}
+        />
+      )}
+      {validCount && count?.state === "failed" && (
+        <div className="table-count-error" role="alert">
+          Count failed: {count.error?.message}
+        </div>
+      )}
+      <div className="table-pagination" aria-label="Table pagination">
+        <span className="read-only">
+          <Lock size={12} aria-hidden="true" />
+          Read-only
+        </span>
         <span className="spacer" />
+        <span className="page-range" aria-live="polite">
+          {fetched
+            ? `${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + fetched).toLocaleString()}`
+            : "0 rows"}
+          {total !== undefined &&
+            total !== null &&
+            ` of ${BigInt(total).toLocaleString()} rows`}
+        </span>
         <Button
           className="quiet icon"
           aria-label="First page"

@@ -6,11 +6,35 @@ import {
   columnSizingFeature,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Check, Copy, X, PanelRightOpen } from "lucide-react";
+import {
+  ArrowDown,
+  ArrowUp,
+  Check,
+  Copy,
+  KeyRound,
+  PanelRightOpen,
+  X,
+} from "lucide-react";
 import { Button } from "./Button";
-import type { Result, TableSettings } from "../types";
+import type { Column, Relation, Result, TableSettings } from "../types";
+import { quoteIdent } from "../api";
 const features = tableFeatures({ columnSizingFeature });
 type Point = { row: number; col: number };
+const isNumber = (c: Column) => /int|numeric|float/.test(c.dataType);
+const isChip = (c: Column) => c.isEnum || c.dataType === "bool";
+const display = (c: Column, v: string) =>
+  c.dataType === "bool" ? (v === "t" ? "true" : v === "f" ? "false" : v) : v;
+// Untyped literals coerce to the target column type in INSERT … VALUES.
+const sqlLiteral = (v: string | null) =>
+  v === null ? "NULL" : `'${v.replaceAll("'", "''")}'`;
+function pretty(c: Column, v: string) {
+  if (c.dataType !== "json" && c.dataType !== "jsonb") return v;
+  try {
+    return JSON.stringify(JSON.parse(v), null, 2);
+  } catch {
+    return v;
+  }
+}
 const tsv = (v: string | null) =>
   v === null ? "\\N" : /[\t\n\r"]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
 export const ResultsGrid = memo(function ResultsGrid({
@@ -19,8 +43,10 @@ export const ResultsGrid = memo(function ResultsGrid({
   onSort,
   compact = false,
   rowOffset = 0,
+  relation,
 }: {
   result: Result;
+  relation?: Relation;
   compact?: boolean;
   rowOffset?: number;
   sort?: TableSettings["sort"];
@@ -48,7 +74,7 @@ export const ResultsGrid = memo(function ResultsGrid({
         id: String(i),
         accessorFn: (row: (string | null)[]) => row[i],
         header: c.name,
-        size: /int|numeric|float/.test(c.dataType) ? 155 : 210,
+        size: isNumber(c) ? 140 : isChip(c) ? 150 : 210,
         minSize: 80,
         maxSize: 800,
       })),
@@ -83,16 +109,12 @@ export const ResultsGrid = memo(function ResultsGrid({
     minCol = Math.min(anchor.col, end.col),
     maxCol = Math.max(anchor.col, end.col);
   const selectedValue = result.rows[end.row]?.[end.col];
-  async function copy() {
-    const text = result.rows
-      .slice(minRow, maxRow + 1)
-      .map((r) =>
-        r
-          .slice(minCol, maxCol + 1)
-          .map(tsv)
-          .join("\t"),
-      )
-      .join("\n");
+  const primaryKeys = new Set(
+    relation?.columns
+      .filter((c) => c.primaryKeyPosition !== undefined)
+      .map((c) => c.name),
+  );
+  async function writeClipboard(text: string) {
     try {
       if (native) {
         const { writeText } =
@@ -105,6 +127,40 @@ export const ResultsGrid = memo(function ResultsGrid({
     } catch {
       setCopyState("Clipboard unavailable");
     }
+  }
+  function copyRowJSON() {
+    const row = result.rows[end.row];
+    if (!row) return;
+    void writeClipboard(
+      JSON.stringify(
+        Object.fromEntries(result.columns.map((c, i) => [c.name, row[i]])),
+        null,
+        2,
+      ),
+    );
+  }
+  function copyRowInsert() {
+    const row = result.rows[end.row];
+    if (!row || !relation) return;
+    void writeClipboard(
+      `INSERT INTO ${quoteIdent(relation.schema)}.${quoteIdent(relation.name)} (${result.columns
+        .map((c) => quoteIdent(c.name))
+        .join(", ")})\nVALUES (${result.columns
+        .map((_, i) => sqlLiteral(row[i]))
+        .join(", ")});`,
+    );
+  }
+  async function copy() {
+    const text = result.rows
+      .slice(minRow, maxRow + 1)
+      .map((r) =>
+        r
+          .slice(minCol, maxCol + 1)
+          .map(tsv)
+          .join("\t"),
+      )
+      .join("\n");
+    await writeClipboard(text);
   }
   function move(point: Point, extend = false) {
     point = {
@@ -132,12 +188,18 @@ export const ResultsGrid = memo(function ResultsGrid({
   return (
     <div className="results" data-testid="results">
       <div className="results-toolbar">
-        <span className="eyebrow">RESULTS</span>
-        <span>
-          {result.rows.length.toLocaleString()} displayed
-          {result.truncated
-            ? ` of ${Number(result.returnedRows).toLocaleString()}`
-            : ""}
+        <span className="result-status">
+          <Check size={13} className="ok" aria-hidden="true" />
+          <span>
+            {result.truncated
+              ? `${result.rows.length.toLocaleString()} of ${Number(result.returnedRows).toLocaleString()} returned`
+              : `${Number(result.returnedRows).toLocaleString()} returned`}
+          </span>
+          <span aria-hidden="true">·</span>
+          <span>{result.durationMs.toFixed(1)} ms</span>
+          {result.truncated && (
+            <span className="warning">Limited to 1,000 rows / 8 MiB</span>
+          )}
         </span>
         <span className="spacer" />
         <Button
@@ -151,7 +213,8 @@ export const ResultsGrid = memo(function ResultsGrid({
         </Button>
         <Button
           className="icon quiet"
-          aria-label="Inspect selected cell"
+          aria-label="Inspect selected row"
+          aria-pressed={inspect}
           onClick={() => setInspect(!inspect)}
         >
           <PanelRightOpen size={15} />
@@ -246,23 +309,31 @@ export const ResultsGrid = memo(function ResultsGrid({
                 }
                 style={{ left: v.start, width: v.size }}
               >
-                {onSort ? (
-                  <button
-                    className="sort-column"
-                    onClick={() => onSort(result.columns[v.index].name)}
-                  >
-                    {result.columns[v.index].name}
-                    <span>
-                      {sort?.column === result.columns[v.index].name
-                        ? sort.direction === "asc"
-                          ? "↑"
-                          : "↓"
-                        : "↕"}
-                    </span>
-                  </button>
-                ) : (
-                  <span>{result.columns[v.index].name}</span>
-                )}
+                <span className="column-title">
+                  {onSort ? (
+                    <button
+                      className="sort-column"
+                      onClick={() => onSort(result.columns[v.index].name)}
+                    >
+                      <span>{result.columns[v.index].name}</span>
+                      {sort?.column === result.columns[v.index].name &&
+                        (sort.direction === "asc" ? (
+                          <ArrowUp size={11} aria-label="sorted ascending" />
+                        ) : (
+                          <ArrowDown size={11} aria-label="sorted descending" />
+                        ))}
+                    </button>
+                  ) : (
+                    <span>{result.columns[v.index].name}</span>
+                  )}
+                  {primaryKeys.has(result.columns[v.index].name) && (
+                    <KeyRound
+                      size={11}
+                      className="pk-icon"
+                      aria-label="Primary key"
+                    />
+                  )}
+                </span>
                 <small>{result.columns[v.index].dataType}</small>
                 <div
                   className="resize-handle"
@@ -320,6 +391,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                 <div className="row-number">{v.index + 1 + rowOffset}</div>
                 {horizontal.getVirtualItems().map((c) => {
                   const value = result.rows[v.index][c.index],
+                    column = result.columns[c.index],
                     selected =
                       v.index >= minRow &&
                       v.index <= maxRow &&
@@ -332,7 +404,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                       role="gridcell"
                       aria-colindex={c.index + 1}
                       aria-selected={selected}
-                      className={`grid-cell ${selected ? "selected" : ""} ${value === null ? "null-value" : ""} ${/int|numeric|float/.test(result.columns[c.index].dataType) ? "number-value" : ""}`}
+                      className={`grid-cell ${selected ? "selected" : ""} ${value === null ? "null-value" : ""} ${isNumber(column) ? "number-value" : ""}`}
                       style={{ left: c.start, width: c.size }}
                       onPointerDown={(e) => {
                         e.preventDefault();
@@ -350,9 +422,13 @@ export const ResultsGrid = memo(function ResultsGrid({
                       onDoubleClick={() => setInspect(true)}
                     >
                       {value === null ? (
-                        "NULL"
+                        <span className="value-chip null">NULL</span>
                       ) : value === "" ? (
                         <span className="empty-value">empty</span>
+                      ) : isChip(column) ? (
+                        <span className="value-chip">
+                          {display(column, value)}
+                        </span>
                       ) : value.length > 160 ? (
                         `${value.slice(0, 160)}…`
                       ) : (
@@ -370,10 +446,30 @@ export const ResultsGrid = memo(function ResultsGrid({
             </div>
           )}
         </div>
-        {inspect && (
-          <aside className="cell-inspector">
-            <div>
-              <strong>Cell inspector</strong>
+        {inspect && result.rows[end.row] && (
+          <aside className="cell-inspector" aria-label="Row inspector">
+            <div className="inspector-heading">
+              <strong>Row {(end.row + 1 + rowOffset).toLocaleString()}</strong>
+              {relation && (
+                <span className="inspector-context">{relation.name}</span>
+              )}
+              <span className="spacer" />
+              <Button
+                className="icon quiet"
+                aria-label="Previous row"
+                disabled={end.row === 0}
+                onClick={() => move({ ...end, row: end.row - 1 })}
+              >
+                <ArrowUp size={13} />
+              </Button>
+              <Button
+                className="icon quiet"
+                aria-label="Next row"
+                disabled={end.row >= result.rows.length - 1}
+                onClick={() => move({ ...end, row: end.row + 1 })}
+              >
+                <ArrowDown size={13} />
+              </Button>
               <Button
                 className="icon quiet"
                 aria-label="Close inspector"
@@ -382,24 +478,54 @@ export const ResultsGrid = memo(function ResultsGrid({
                 <X size={14} />
               </Button>
             </div>
-            <span className="eyebrow">
-              {result.columns[end.col]?.name} ·{" "}
-              {result.columns[end.col]?.dataType}
-            </span>
-            <pre>{selectedValue === null ? "NULL" : (selectedValue ?? "")}</pre>
+            <div className="inspector-body">
+              <section className="inspector-selected">
+                <span className="inspector-label">
+                  {result.columns[end.col]?.name} ·{" "}
+                  {result.columns[end.col]?.dataType}
+                </span>
+                <pre>
+                  {selectedValue === null
+                    ? "NULL"
+                    : pretty(result.columns[end.col], selectedValue ?? "")}
+                </pre>
+              </section>
+              <dl className="inspector-fields">
+                {result.columns.map((c, i) => {
+                  const v = result.rows[end.row][i];
+                  return (
+                    <div
+                      key={i}
+                      className={i === end.col ? "current" : ""}
+                      onClick={() => move({ ...end, col: i })}
+                    >
+                      <dt>
+                        {c.name} <small>{c.dataType}</small>
+                      </dt>
+                      <dd>
+                        {v === null ? (
+                          <span className="value-chip null">NULL</span>
+                        ) : isChip(c) ? (
+                          <span className="value-chip">{display(c, v)}</span>
+                        ) : v.length > 400 ? (
+                          `${v.slice(0, 400)}…`
+                        ) : (
+                          v
+                        )}
+                      </dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </div>
+            <div className="inspector-actions">
+              <Button onClick={copyRowJSON}>Copy as JSON</Button>
+              {relation && (
+                <Button onClick={copyRowInsert}>Copy as INSERT</Button>
+              )}
+            </div>
           </aside>
         )}
-      </div>
-      <div className="result-status">
-        <span className="status-dot" />
-        <span>{result.durationMs.toFixed(1)} ms</span>
-        <span>·</span>
-        <span>{Number(result.returnedRows).toLocaleString()} returned</span>
-        {result.truncated && (
-          <span className="warning">Limited to 1,000 rows / 8 MiB</span>
-        )}
-        <span className="spacer" />
-        <span>Read-only grid</span>
       </div>
     </div>
   );
