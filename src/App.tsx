@@ -847,7 +847,11 @@ export default function App() {
         >
           <PanelLeft size={16} />
         </Button>
-        <nav className="tabbar" aria-label="Open documents" ref={tabStrip}>
+        <nav
+          className={`tabbar ${hiddenTabs.length ? "overflowing" : ""}`}
+          aria-label="Open documents"
+          ref={tabStrip}
+        >
           {visibleTabs.map((t) => {
             const tabRunning = Object.values(t.executions).some(
               (e) => e.state === "running",
@@ -1257,10 +1261,7 @@ export default function App() {
                     <span>{tab.relation.schema}.</span>
                     {tab.relation.name}
                   </h1>
-                  <span className="relation-meta">
-                    {tab.relation.kind} · {tab.relation.columns.length}{" "}
-                    {tab.relation.columns.length === 1 ? "column" : "columns"}
-                  </span>
+
                   <TabsList>
                     <TabsTrigger value="data">Data</TabsTrigger>
                     <TabsTrigger value="structure">Structure</TabsTrigger>
@@ -1319,15 +1320,17 @@ export default function App() {
                     <table>
                       <thead>
                         <tr>
+                          <th className="ordinal">#</th>
                           <th>Column</th>
                           <th>Type</th>
                           <th>Nullable</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {tab.relation.columns.map((c) => (
+                        {tab.relation.columns.map((c, i) => (
                           <tr key={c.name}>
-                            <td>
+                            <td className="ordinal">{i + 1}</td>
+                            <td className="column-name">
                               {c.name}
                               {c.primaryKeyPosition !== undefined && (
                                 <KeyRound
@@ -1337,8 +1340,14 @@ export default function App() {
                                 />
                               )}
                             </td>
-                            <td>{c.type}</td>
-                            <td>{c.required ? "No" : "Yes"}</td>
+                            <td className="column-type">{c.type}</td>
+                            <td>
+                              {c.required ? (
+                                <span className="not-null">not null</span>
+                              ) : (
+                                <span className="value-chip">nullable</span>
+                              )}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

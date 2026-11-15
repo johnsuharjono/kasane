@@ -1406,41 +1406,6 @@
     min-height: 30px;
     font-size: 12px;
   }
-  .structure-view {
-    padding: 25px;
-    overflow: auto;
-    flex: 1;
-  }
-  .structure-view h2 {
-    font-size: 19px;
-    font-weight: 550;
-    margin: 0 0 6px;
-  }
-  .structure-view p {
-    color: var(--muted-foreground);
-    font-size: 11px;
-    margin: 0 0 22px;
-  }
-  .structure-view table {
-    border-collapse: collapse;
-    width: 100%;
-    font-size: 12px;
-    text-align: left;
-  }
-  .structure-view th {
-    font-weight: 500;
-    color: var(--muted-foreground);
-    background: var(--muted);
-  }
-  .structure-view td,
-  .structure-view th {
-    padding: 11px;
-    border-bottom: 1px solid var(--line);
-  }
-  .structure-view td:nth-child(2) {
-    font-family: var(--mono);
-    font-size: 11px;
-  }
   .table-browser {
     display: flex;
     flex-direction: column;
@@ -1450,17 +1415,6 @@
   .table-browser > .execution-view {
     flex: 1;
     min-height: 0;
-  }
-  .table-filters {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 11px 18px;
-    border-bottom: 1px solid var(--line);
-    background: var(--background);
-    font-size: 11px;
-    color: var(--muted-foreground);
-    flex-wrap: wrap;
   }
   .table-filters select,
   .table-filters input {
@@ -1605,9 +1559,6 @@
     padding: 0 4px;
     color: var(--accent-foreground);
   }
-  .table-filters {
-    padding: 9px 18px;
-  }
   .table-view-switch > [data-slot="button"] {
     flex-shrink: 0;
   }
@@ -1680,7 +1631,7 @@
     align-items: center;
   }
   .traffic-space {
-    width: 64px;
+    width: 78px;
   }
   .tabbar {
     position: relative;
@@ -1701,9 +1652,24 @@
   .tabbar::-webkit-scrollbar {
     display: none;
   }
+  /* Fade the edges once tabs no longer fit, so clipped tabs read as scrolled. */
+  .tabbar.overflowing {
+    mask-image: linear-gradient(
+      to right,
+      transparent 0,
+      #000 18px,
+      #000 calc(100% - 18px),
+      transparent 100%
+    );
+  }
+  .tab > button:first-child {
+    min-width: 0;
+  }
   .tab {
+    flex: 0 1 auto;
+    min-width: 84px;
     height: 30px;
-    max-width: 210px;
+    max-width: 200px;
     padding: 0 3px 0 10px;
     gap: 2px;
     border: 1px solid transparent;
@@ -2268,6 +2234,7 @@
     color: var(--primary);
   }
   .pk-icon {
+    display: inline-block;
     color: var(--warning-foreground);
     flex-shrink: 0;
     margin-left: 4px;
@@ -2430,14 +2397,6 @@
     color: var(--muted-foreground);
     font-weight: 400;
   }
-  .relation-meta {
-    font-size: 11.5px;
-    color: var(--muted-foreground);
-    background: var(--muted);
-    padding: 2px 8px;
-    border-radius: 5px;
-    white-space: nowrap;
-  }
   .table-toolbar {
     display: flex;
     align-items: center;
@@ -2453,7 +2412,70 @@
     align-items: center;
     gap: 8px;
     padding: 6px 0;
-    flex-wrap: wrap;
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--muted-foreground);
+  }
+  .table-filters input {
+    width: 200px;
+    height: 30px;
+  }
+
+  /* Structure view */
+  .structure-view {
+    flex: 1;
+    overflow: auto;
+    padding: 20px;
+  }
+  .structure-view table {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 12.5px;
+    text-align: left;
+  }
+  .structure-view th {
+    height: 34px;
+    padding: 0 14px;
+    background: color-mix(in srgb, var(--muted) 70%, var(--background));
+    border-bottom: 1px solid var(--border);
+    color: var(--muted-foreground);
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .structure-view td {
+    height: 36px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: middle;
+  }
+  .structure-view tr:last-child td {
+    border-bottom: 0;
+  }
+  .structure-view tbody tr:hover {
+    background: var(--muted);
+  }
+  .structure-view .ordinal {
+    width: 44px;
+    color: var(--muted-foreground);
+    font: 11px var(--mono);
+    text-align: right;
+  }
+  .structure-view .column-name {
+    font: 500 12.5px var(--mono);
+    color: var(--foreground);
+  }
+  .structure-view .column-name .pk-icon {
+    margin-left: 6px;
+  }
+  .structure-view .column-type {
+    font: 12px var(--mono);
+    color: var(--muted-foreground);
+  }
+  .structure-view .not-null {
     color: var(--muted-foreground);
   }
   .filter-summary {
@@ -2493,9 +2515,6 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-  }
-  .structure-view td .pk-icon {
-    margin-left: 6px;
   }
 
   /* Status bar */
