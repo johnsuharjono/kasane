@@ -2993,4 +2993,29 @@
   .column-option {
     font: 12px var(--mono);
   }
+
+  /* Delete confirmation */
+  .confirm-dialog {
+    gap: 10px;
+    padding: 20px;
+  }
+  .confirm-dialog h2 {
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.35;
+  }
+  .confirm-dialog p {
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--muted-foreground);
+  }
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+    margin-top: 8px;
+  }
+  .destructive-item {
+    color: var(--error-foreground);
+  }
 }

@@ -76,6 +76,12 @@ import ReactMarkdown from "react-markdown";
 import { Button } from "./components/Button";
 import { SqlEditor } from "./components/SqlEditor";
 import { ConnectionDialog } from "./components/ConnectionDialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "./components/ui/dialog";
 import { api, native, quoteIdent } from "./api";
 import { useWorkspace, mutateCells } from "./store";
 import {
@@ -127,6 +133,11 @@ export default function App() {
   // Success messages fade on their own; errors stay until dismissed.
   const [flash, setFlash] = useState("");
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [deleting, setDeleting] = useState<{
+    id: string;
+    kind: "sql" | "notebook";
+    title: string;
+  }>();
   const [hiddenTabs, setHiddenTabs] = useState<string[]>([]);
   const tabStrip = useRef<HTMLElement>(null);
   const { resolved: theme, setAppearance } = useAppearance();
@@ -703,6 +714,31 @@ export default function App() {
     setFocusedCell(cell.id);
     if (kind === "markdown") setMarkdownEditing(cell.id);
   }
+  async function deleteDocument(d: NonNullable<typeof deleting>) {
+    const openTab = useWorkspace.getState().tabs.find((t) => t.id === d.id);
+    if (
+      openTab &&
+      Object.values(openTab.executions).some((e) => e.state === "running")
+    ) {
+      setNotice("Cancel the running query before deleting this document.");
+      return;
+    }
+    try {
+      // Close without the save-on-close path, which would rewrite the file.
+      if (openTab) {
+        if (openTab.sessionId)
+          await api.close(openTab.sessionId).catch(() => {});
+        close(openTab.id);
+      }
+      await (d.kind === "sql"
+        ? api.deleteSQLDocument(d.id)
+        : api.deleteNotebook(d.id));
+      await refresh();
+      setFlash(`Deleted “${d.title}”.`);
+    } catch (e) {
+      setNotice(asError(e).message);
+    }
+  }
   function runAll(t: Tab) {
     void runCells(
       t,
@@ -1174,21 +1210,37 @@ export default function App() {
                   </div>
                   <div className="notebook-list" aria-label="Documents">
                     {documents.map((d) => (
-                      <button
-                        key={d.id}
-                        className={activeId === d.id ? "active" : ""}
-                        onClick={d.open}
-                      >
-                        {d.kind === "sql" ? (
-                          <FileCode2 size={14} aria-hidden="true" />
-                        ) : (
-                          <BookOpen size={14} aria-hidden="true" />
-                        )}
-                        <span>{d.title}</span>
-                        <small aria-hidden="true">
-                          {d.kind === "sql" ? "sql" : "notebook"}
-                        </small>
-                      </button>
+                      <ContextMenu key={d.id}>
+                        <ContextMenuTrigger
+                          render={
+                            <button
+                              className={activeId === d.id ? "active" : ""}
+                              onClick={d.open}
+                            />
+                          }
+                        >
+                          {d.kind === "sql" ? (
+                            <FileCode2 size={14} aria-hidden="true" />
+                          ) : (
+                            <BookOpen size={14} aria-hidden="true" />
+                          )}
+                          <span>{d.title}</span>
+                          <small aria-hidden="true">
+                            {d.kind === "sql" ? "sql" : "notebook"}
+                          </small>
+                        </ContextMenuTrigger>
+                        <ContextMenuContent>
+                          <ContextMenuItem onClick={d.open}>
+                            Open
+                          </ContextMenuItem>
+                          <ContextMenuItem
+                            className="destructive-item"
+                            onClick={() => setDeleting(d)}
+                          >
+                            Delete…
+                          </ContextMenuItem>
+                        </ContextMenuContent>
+                      </ContextMenu>
                     ))}
                     {!documents.length && (
                       <div className="sidebar-hint">
@@ -1811,6 +1863,42 @@ export default function App() {
         workspaceName={activeWorkspace?.name}
         onOpenRelation={(r) => openTable(r)}
       />
+      <Dialog
+        open={!!deleting}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(undefined);
+        }}
+      >
+        <DialogContent
+          className="confirm-dialog sm:max-w-[420px]"
+          showCloseButton={false}
+        >
+          <DialogTitle>Delete “{deleting?.title}”?</DialogTitle>
+          <DialogDescription>
+            This removes the saved{" "}
+            {deleting?.kind === "sql" ? "SQL document" : "notebook"} from this
+            Mac
+            {tabs.some((t) => t.id === deleting?.id)
+              ? " and closes its tab, discarding unsaved changes"
+              : ""}
+            . This can’t be undone.
+          </DialogDescription>
+          <div className="confirm-actions">
+            <Button onClick={() => setDeleting(undefined)}>Cancel</Button>
+            <Button
+              className="danger"
+              autoFocus
+              onClick={() => {
+                const d = deleting!;
+                setDeleting(undefined);
+                void deleteDocument(d);
+              }}
+            >
+              Delete
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
       {connectionDialog && (
         <ConnectionDialog

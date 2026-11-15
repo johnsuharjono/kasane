@@ -26,6 +26,14 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
       sqlDocuments.set(args.document.id, structuredClone(args.document));
       return;
     }
+    if (command === "delete_sql_document") {
+      sqlDocuments.delete(args.id);
+      return;
+    }
+    if (command === "delete_notebook") {
+      notebooks.delete(args.id);
+      return;
+    }
     if (command === "save_notebook") {
       notebooks.set(args.notebook.id, structuredClone(args.notebook));
       return;

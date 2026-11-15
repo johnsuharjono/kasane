@@ -22,6 +22,8 @@ export const api = {
   sqlDocuments: () => call<SQLDocument[]>("list_sql_documents"),
   saveSQLDocument: (document: SQLDocument) =>
     call<void>("save_sql_document", { document }),
+  deleteSQLDocument: (id: string) => call<void>("delete_sql_document", { id }),
+  deleteNotebook: (id: string) => call<void>("delete_notebook", { id }),
   readSQL: (path: string) => call<string>("read_sql_file", { path }),
   writeSQL: (path: string, source: string) =>
     call<void>("write_sql_file", { path, source }),

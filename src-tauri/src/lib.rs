@@ -250,6 +250,37 @@ async fn save_notebook(state: State<'_, AppState>, notebook: Notebook) -> Result
     )
     .await
 }
+/// Removes a saved document's file; a missing file counts as already deleted.
+async fn remove_document(path: PathBuf) -> Result<(), DbError> {
+    match tokio::fs::remove_file(path).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(err(e)),
+        _ => Ok(()),
+    }
+}
+#[tauri::command]
+async fn delete_notebook(state: State<'_, AppState>, id: String) -> Result<(), DbError> {
+    valid_id(&id)?;
+    let _guard = state.files.lock().await;
+    remove_document(
+        state
+            .root
+            .join("notebooks")
+            .join(format!("{id}.kasane.json")),
+    )
+    .await
+}
+#[tauri::command]
+async fn delete_sql_document(state: State<'_, AppState>, id: String) -> Result<(), DbError> {
+    valid_id(&id)?;
+    let _guard = state.files.lock().await;
+    remove_document(
+        state
+            .root
+            .join("sql-documents")
+            .join(format!("{id}.sql.json")),
+    )
+    .await
+}
 #[tauri::command]
 async fn list_notebooks(state: State<'_, AppState>) -> Result<Vec<Notebook>, DbError> {
     let mut entries = tokio::fs::read_dir(state.root.join("notebooks"))
@@ -353,6 +384,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_sql_documents,
             save_sql_document,
+            delete_sql_document,
+            delete_notebook,
             read_sql_file,
             write_sql_file,
             list_connections,
