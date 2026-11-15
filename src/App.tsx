@@ -670,7 +670,7 @@ export default function App() {
   }
   function newCell(kind: "sql" | "markdown") {
     if (!tab) return;
-    const cell = { id: uid(), kind, source: kind === "sql" ? "SELECT " : "" };
+    const cell = { id: uid(), kind, source: "" };
     patch(tab.id, (t) => mutateCells(t, [...t.cells, cell]));
     setFocusedCell(cell.id);
     if (kind === "markdown") setMarkdownEditing(cell.id);
