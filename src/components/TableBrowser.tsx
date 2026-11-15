@@ -32,12 +32,10 @@ import {
 export function TableBrowser({
   tab,
   onExecute,
-  onCount,
   onOpenReference,
 }: {
   tab: Tab;
   onExecute: (settings: TableSettings) => void;
-  onCount: () => void;
   onOpenReference: (reference: ColumnReference, value: string) => void;
 }) {
   const settings = tab.tableSettings ?? defaultTableSettings;
@@ -59,7 +57,7 @@ export function TableBrowser({
   const validCount =
     count?.source === tableCountQuery(tab.relation!, settings) &&
     !count.outdated;
-  // Keep showing the previous count for this filter while a recount runs.
+  // Keep showing the previous count for this filter while the refreshed total loads.
   const lastCount = useRef<{ source: string; total: string }>(undefined);
   if (validCount && count.state === "success" && count.result?.rows[0]?.[0])
     lastCount.current = {
@@ -266,15 +264,6 @@ export function TableBrowser({
             "Counting…"
           ) : null}
         </span>
-        <Button
-          className="quiet small"
-          onClick={onCount}
-          disabled={busy || tab.disconnected}
-          aria-disabled={running || tab.disconnected}
-          title="Count rows matching the current filter. This can scan a large table."
-        >
-          {counting ? "Counting…" : total != null ? "Recount" : "Count rows"}
-        </Button>
       </div>
       {!execution && (tab.restored || !autoPreview) ? (
         <div className="execution-empty">

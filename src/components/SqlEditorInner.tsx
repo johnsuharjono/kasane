@@ -1,17 +1,19 @@
+import { closeCompletion } from "@codemirror/autocomplete";
 import { usePreferences } from "../preferences";
 import { useAppearance } from "../appearance";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { PostgreSQL, sql } from "@codemirror/lang-sql";
 import { Prec } from "@codemirror/state";
-import { keymap, EditorView, placeholder } from "@codemirror/view";
+import { keymap, EditorView, placeholder, tooltips } from "@codemirror/view";
 import type { Relation } from "../types";
 export function SqlEditor({
   value,
   onChange,
   onRun,
+  onCommandMode,
   catalog,
   compact = false,
   fill = false,
@@ -19,10 +21,12 @@ export function SqlEditor({
   value: string;
   onChange: (value: string) => void;
   onRun: () => void;
+  onCommandMode?: () => void;
   catalog: Relation[];
   compact?: boolean;
   fill?: boolean;
 }) {
+  const editorView = useRef<EditorView | null>(null);
   const { resolved } = useAppearance();
   const { editorFontSize, lineWrapping } = usePreferences();
   const editorTheme = useMemo(
@@ -53,6 +57,7 @@ export function SqlEditor({
   }, [catalog]);
   const extensions = useMemo(
     () => [
+      tooltips({ parent: document.body, position: "fixed" }),
       ...(lineWrapping ? [EditorView.lineWrapping] : []),
       syntaxHighlighting(
         HighlightStyle.define([
@@ -119,10 +124,28 @@ export function SqlEditor({
         },
       }),
     ],
-    [schema, onRun, compact, fill, editorFontSize, lineWrapping],
+    [schema, onRun, onCommandMode, compact, fill, editorFontSize, lineWrapping],
   );
   return (
     <CodeMirror
+      onCreateEditor={(view) => {
+        editorView.current = view;
+      }}
+      onKeyDownCapture={(e) => {
+        const view = editorView.current;
+        if (
+          e.key !== "Escape" ||
+          !onCommandMode ||
+          !view ||
+          e.nativeEvent.isComposing
+        )
+          return;
+        // Escape leaves notebook edit mode even when suggestions are open.
+        closeCompletion(view);
+        e.preventDefault();
+        e.stopPropagation();
+        onCommandMode();
+      }}
       theme={editorTheme}
       value={value}
       onChange={onChange}

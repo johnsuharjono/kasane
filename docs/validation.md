@@ -25,7 +25,8 @@ Playwright runs the UI in WebKit and Chromium against real PostgreSQL through a 
 
 - Connections, catalog browsing, table paging, filtering, sorting, and exact counts.
 - SQL completion, execution shortcuts, document save/reopen, and tab reuse.
-- Notebook cell editing, ordering, sequential execution, and outdated results.
+- Notebook command/edit modes, insertion from prompts and outputs, deletion/undo, execution shortcuts, and shortcut help.
+- Independent notebook outputs: neighboring edits, inserts, deletes, reorders, and runs preserve results; editing the source invalidates its own output.
 - Workspace switching and restoration without query replay.
 - Grid selection, copying, inspection, column resizing, and virtualization.
 - Panel resizing, appearance, editor preferences, and compact notebook results.
