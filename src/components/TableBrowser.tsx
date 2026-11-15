@@ -1,6 +1,7 @@
 import { SelectField } from "./SelectField";
 import { Input } from "./ui/input";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useDelayed } from "../use-delayed";
 import {
   ChevronLeft,
   ChevronRight,
@@ -35,16 +36,30 @@ export function TableBrowser({
   const running = Object.values(tab.executions).some(
     (e) => e.state === "running",
   );
+  // Controls dim only for slow work; App's busy guard drops clicks meanwhile.
+  const busy = useDelayed(running);
   const page = pageFor(settings),
     pageSize = TABLE_PAGE_SIZE;
   const count = tab.executions["table-count"];
   const validCount =
     count?.source === tableCountQuery(tab.relation!, settings) &&
     !count.outdated;
+  // Keep showing the previous count for this filter while a recount runs.
+  const lastCount = useRef<{ source: string; total: string }>(undefined);
+  if (validCount && count.state === "success" && count.result?.rows[0]?.[0])
+    lastCount.current = {
+      source: count.source,
+      total: count.result.rows[0][0],
+    };
   const total =
     validCount && count.state === "success"
       ? count.result?.rows[0]?.[0]
-      : undefined;
+      : validCount &&
+          count.state === "running" &&
+          lastCount.current?.source === count.source
+        ? lastCount.current.total
+        : undefined;
+  const counting = useDelayed(count?.state === "running");
   const totalPages = total
     ? (BigInt(total) + BigInt(pageSize) - 1n) / BigInt(pageSize)
     : undefined;
@@ -92,7 +107,8 @@ export function TableBrowser({
             <Filter size={14} aria-hidden="true" />
             <SelectField
               label="Filter column"
-              disabled={running}
+              disabled={busy}
+              aria-disabled={running}
               value={draft.filterColumn}
               onChange={(filterColumn) => setDraft({ ...draft, filterColumn })}
               options={[
@@ -105,7 +121,8 @@ export function TableBrowser({
             />
             <SelectField
               label="Filter operator"
-              disabled={running}
+              disabled={busy}
+              aria-disabled={running}
               value={draft.filterOperator}
               onChange={(filterOperator) =>
                 setDraft({
@@ -124,21 +141,23 @@ export function TableBrowser({
               <Input
                 aria-label="Filter value"
                 placeholder="Value"
-                disabled={running}
+                disabled={busy}
+                aria-disabled={running}
                 value={draft.filterValue}
                 onChange={(e) =>
                   setDraft({ ...draft, filterValue: e.target.value })
                 }
               />
             )}
-            <Button type="submit" disabled={running || !draft.filterColumn}>
+            <Button type="submit" disabled={busy || !draft.filterColumn}>
               Apply
             </Button>
             {settings.filterColumn && (
               <Button
                 className="quiet icon"
                 aria-label="Clear filter"
-                disabled={running}
+                disabled={busy}
+                aria-disabled={running}
                 onClick={clearFilter}
               >
                 <X size={13} />
@@ -174,21 +193,18 @@ export function TableBrowser({
               <strong>{BigInt(total).toLocaleString()}</strong>{" "}
               {settings.filterColumn ? "rows match" : "rows"}
             </>
-          ) : count?.state === "running" ? (
+          ) : counting ? (
             "Counting…"
           ) : null}
         </span>
         <Button
           className="quiet small"
           onClick={onCount}
-          disabled={running || tab.disconnected}
+          disabled={busy || tab.disconnected}
+          aria-disabled={running || tab.disconnected}
           title="Count rows matching the current filter. This can scan a large table."
         >
-          {count?.state === "running"
-            ? "Counting…"
-            : total != null
-              ? "Recount"
-              : "Count rows"}
+          {counting ? "Counting…" : total != null ? "Recount" : "Count rows"}
         </Button>
       </div>
       {!execution && (tab.restored || !autoPreview) ? (
@@ -202,7 +218,7 @@ export function TableBrowser({
           relation={tab.relation}
           rowOffset={page * pageSize}
           sort={settings.sort}
-          onSort={running ? undefined : sort}
+          onSort={sort}
         />
       )}
       {validCount && count?.state === "failed" && (
@@ -227,7 +243,8 @@ export function TableBrowser({
         <Button
           className="quiet icon"
           aria-label="First page"
-          disabled={running || tab.disconnected || page === 0}
+          disabled={busy || tab.disconnected || page === 0}
+          aria-disabled={running || tab.disconnected || page === 0}
           onClick={() => onExecute({ ...settings, page: 0 })}
         >
           <ChevronsLeft size={14} />
@@ -235,7 +252,8 @@ export function TableBrowser({
         <Button
           className="quiet icon"
           aria-label="Previous page"
-          disabled={running || tab.disconnected || page === 0}
+          disabled={busy || tab.disconnected || page === 0}
+          aria-disabled={running || tab.disconnected || page === 0}
           onClick={() => onExecute({ ...settings, page: page - 1 })}
         >
           <ChevronLeft size={14} />
@@ -250,6 +268,12 @@ export function TableBrowser({
           className="quiet icon"
           aria-label="Next page"
           disabled={
+            busy ||
+            tab.disconnected ||
+            !execution?.hasNextPage ||
+            execution?.outdated
+          }
+          aria-disabled={
             running ||
             tab.disconnected ||
             !execution?.hasNextPage ||

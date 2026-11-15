@@ -42,6 +42,7 @@ import {
 } from "./components/CommandPalette";
 import { useAppearance } from "./appearance";
 import { connectionColor } from "./connection-colors";
+import { useDelayed } from "./use-delayed";
 import {
   FolderOpen,
   BookOpen,
@@ -625,6 +626,8 @@ export default function App() {
   const schemas = [...new Set(catalog.map((r) => r.schema))];
   const running =
     !!tab && Object.values(tab.executions).some((e) => e.state === "running");
+  // Busy UI waits a moment so sub-second work (counts, small pages) doesn't flash.
+  const showBusy = useDelayed(running);
   const currentCatalog =
     catalogCache.current.get(tab?.connectionId ?? "") ?? [];
   function openTable(
@@ -822,7 +825,7 @@ export default function App() {
   const sessionState = (t: Tab) =>
     t.disconnected
       ? { label: "Disconnected", tone: "warning" }
-      : Object.values(t.executions).some((e) => e.state === "running")
+      : t.id === activeId && showBusy
         ? { label: "Running", tone: "busy" }
         : t.sessionId
           ? { label: "Session live", tone: "live" }
@@ -865,14 +868,10 @@ export default function App() {
                 <button onClick={() => activate(t.id)}>
                   {tabIcon(t)}
                   <span>{t.title}</span>
-                  {tabRunning ? (
-                    <span className="tab-spinner" aria-hidden="true" />
-                  ) : (
-                    t.dirty &&
-                    !t.relation && (
-                      <span className="dirty-dot" aria-hidden="true" />
-                    )
-                  )}
+                  <TabStatus
+                    running={tabRunning}
+                    dirty={t.dirty && !t.relation}
+                  />
                 </button>
                 <Button
                   className="quiet icon"
@@ -1300,7 +1299,7 @@ export default function App() {
                     Open as SQL
                   </Button>
                   {tab.view === "data" &&
-                    (running ? (
+                    (showBusy ? (
                       <Button className="danger" onClick={() => cancel(tab)}>
                         <Square size={12} />
                         Cancel
@@ -1432,7 +1431,7 @@ export default function App() {
                     <Save size={14} />
                     Save<kbd aria-hidden="true">⌘S</kbd>
                   </Button>
-                  {running ? (
+                  {showBusy ? (
                     <Button className="danger" onClick={() => cancel(tab)}>
                       <Square size={12} />
                       Cancel
@@ -1836,4 +1835,9 @@ function formatEstimate(n: number) {
   if (n < 10_000) return `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`;
   if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
   return `${(n / 1_000_000).toFixed(1).replace(/\.0$/, "")}M`;
+}
+function TabStatus({ running, dirty }: { running: boolean; dirty: boolean }) {
+  const spinning = useDelayed(running);
+  if (spinning) return <span className="tab-spinner" aria-hidden="true" />;
+  return dirty ? <span className="dirty-dot" aria-hidden="true" /> : null;
 }
