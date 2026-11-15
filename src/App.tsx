@@ -35,7 +35,13 @@ import { Input } from "./components/ui/input";
 import { Textarea } from "./components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { QueryPane } from "./components/QueryPane";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import {
   CommandPalette,
   type PaletteAction,
@@ -87,6 +93,8 @@ import { useWorkspace, mutateCells } from "./store";
 import {
   asError,
   uid,
+  type Execution,
+  type Cell,
   type Connection,
   type Notebook,
   type SQLDocument,
@@ -156,6 +164,22 @@ export default function App() {
     [editConnection, setEditConnection] = useState<Connection>();
   const [sidebar, setSidebar] = useState(true),
     [help, setHelp] = useState(false);
+  const notebookRoot = useRef<HTMLDivElement>(null);
+  const deleteKey = useRef<{ cellId: string; time: number } | null>(null);
+  const deletedCells = useRef<
+    { tabId: string; index: number; cell: Cell; execution?: Execution }[]
+  >([]);
+  const pendingNotebookFocus = useRef<{ id: string; edit: boolean } | null>(
+    null,
+  );
+  const [notebookMode, setNotebookMode] = useState<"command" | "edit">(
+    "command",
+  );
+  useLayoutEffect(() => {
+    const pending = pendingNotebookFocus.current;
+    if (pending && applyNotebookFocus(pending.id, pending.edit))
+      pendingNotebookFocus.current = null;
+  });
   const [focusedCell, setFocusedCell] = useState<string | null>(null),
     [markdownEditing, setMarkdownEditing] = useState<string | null>(null);
   const sidebarWidth = useRef(
@@ -346,6 +370,8 @@ export default function App() {
         source,
         result,
       });
+      // Load rows first, then update the exact total for the same filter.
+      await countTable(t, settings, sessionId);
     } catch (e) {
       const error = asError(e);
       setExecution(t.id, "table-data", {
@@ -360,21 +386,15 @@ export default function App() {
       busy.current.delete(t.id);
     }
   }
-  async function countTable(t: Tab) {
-    if (!t.relation || busy.current.has(t.id)) return;
-    busy.current.add(t.id);
+  async function countTable(
+    t: Tab,
+    settings: TableSettings,
+    sessionId: string,
+  ) {
     const requestId = uid(),
-      source = tableCountQuery(
-        t.relation,
-        t.tableSettings ?? {
-          filterColumn: "",
-          filterOperator: "contains",
-          filterValue: "",
-        },
-      );
+      source = tableCountQuery(t.relation!, settings);
     setExecution(t.id, "table-count", { state: "running", requestId, source });
     try {
-      const sessionId = await sessionFor(t);
       const result = await api.execute(sessionId, requestId, source);
       setExecution(t.id, "table-count", {
         state: "success",
@@ -392,8 +412,6 @@ export default function App() {
       });
       if (error.disconnected)
         patch(t.id, (t) => ({ ...t, disconnected: true }));
-    } finally {
-      busy.current.delete(t.id);
     }
   }
   async function runCells(t: Tab, cellIds: string[]) {
@@ -412,19 +430,6 @@ export default function App() {
               0,
               ...Object.values(current.executions).map((e) => e.runNumber ?? 0),
             ) + 1;
-        patch(t.id, (t) => ({
-          ...t,
-          executions: Object.fromEntries(
-            Object.entries(t.executions).map(([id, e]) => [
-              id,
-              id === "table-data" ||
-              t.cells.findIndex((c) => c.id === id) >
-                t.cells.findIndex((c) => c.id === cellId)
-                ? { ...e, outdated: true }
-                : e,
-            ]),
-          ),
-        }));
         setExecution(t.id, cellId, {
           state: "running",
           requestId,
@@ -711,8 +716,182 @@ export default function App() {
     if (!tab) return;
     const cell = { id: uid(), kind, source: "" };
     patch(tab.id, (t) => mutateCells(t, [...t.cells, cell]));
-    setFocusedCell(cell.id);
-    if (kind === "markdown") setMarkdownEditing(cell.id);
+    focusNotebookCell(cell.id, true);
+  }
+  function applyNotebookFocus(id: string, edit: boolean) {
+    const cell = notebookRoot.current?.querySelector<HTMLElement>(
+      `[data-cell-id="${id}"]`,
+    );
+    const target = edit
+      ? cell?.querySelector<HTMLElement>(".cm-content, textarea")
+      : cell;
+    if (!target) return false;
+    target.focus({ preventScroll: true });
+    // WebKit can resume typing into an old contenteditable DOM selection.
+    // CodeMirror keeps its own cursor state for when edit mode resumes.
+    if (!edit) window.getSelection()?.removeAllRanges();
+    const anchor = cell?.querySelector<HTMLElement>(".cell-main");
+    const rect = anchor?.getBoundingClientRect();
+    if (rect && (rect.top < 80 || rect.top > window.innerHeight - 100))
+      anchor?.scrollIntoView({ block: "nearest" });
+    return true;
+  }
+  function focusNotebookCell(id: string, edit = false) {
+    setFocusedCell(id);
+    setNotebookMode(edit ? "edit" : "command");
+    setMarkdownEditing(edit ? id : null);
+    // Move existing focus synchronously; focus new DOM before the next paint.
+    pendingNotebookFocus.current = applyNotebookFocus(id, edit)
+      ? null
+      : { id, edit };
+  }
+  function insertNotebookCell(index: number, edit = false) {
+    if (!tab || running) return;
+    const cell: Cell = { id: uid(), kind: "sql", source: "" };
+    patch(tab.id, (t) => {
+      const cells = [...t.cells];
+      cells.splice(index, 0, cell);
+      return mutateCells(t, cells);
+    });
+    focusNotebookCell(cell.id, edit);
+  }
+  function deleteNotebookCell(cellId: string) {
+    if (!tab || busy.current.has(tab.id)) return;
+    const index = tab.cells.findIndex((c) => c.id === cellId);
+    if (index < 0) return;
+    deletedCells.current.push({
+      tabId: tab.id,
+      index,
+      cell: tab.cells[index],
+      execution: tab.executions[cellId],
+    });
+    const remaining = tab.cells.filter((c) => c.id !== cellId);
+    const fallback: Cell = { id: uid(), kind: "sql", source: "" };
+    const cells = remaining.length ? remaining : [fallback];
+    patch(tab.id, (t) => mutateCells(t, cells));
+    focusNotebookCell(cells[Math.min(index, cells.length - 1)].id);
+  }
+  function undoNotebookDelete() {
+    if (!tab || busy.current.has(tab.id)) return;
+    const historyIndex = deletedCells.current
+      .map((d) => d.tabId)
+      .lastIndexOf(tab.id);
+    if (historyIndex < 0) return;
+    const [deleted] = deletedCells.current.splice(historyIndex, 1);
+    patch(tab.id, (t) => {
+      const cells = [...t.cells];
+      cells.splice(Math.min(deleted.index, cells.length), 0, deleted.cell);
+      const next = mutateCells(t, cells);
+      return deleted.execution
+        ? {
+            ...next,
+            executions: {
+              ...next.executions,
+              [deleted.cell.id]: deleted.execution,
+            },
+          }
+        : next;
+    });
+    focusNotebookCell(deleted.cell.id);
+  }
+  function notebookKey(
+    e: ReactKeyboardEvent<HTMLElement>,
+    cell: Cell,
+    index: number,
+  ) {
+    if (e.defaultPrevented || e.nativeEvent.isComposing || !tab) return;
+    const target = e.target as HTMLElement;
+    // SQL handles Escape itself so it can close completion at the same time.
+    if (target.closest(".cm-editor")) return;
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      deleteKey.current = null;
+      focusNotebookCell(cell.id);
+      return;
+    }
+    if (
+      target.closest(
+        "textarea, input, [contenteditable=true], [role=combobox], [role=menu]",
+      )
+    )
+      return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    const key = e.key.toLowerCase();
+    const previousDelete = deleteKey.current;
+    deleteKey.current = null;
+    // Preserve grid navigation and activation of toolbar buttons.
+    if (
+      target !== e.currentTarget &&
+      ["enter", "arrowup", "arrowdown", " "].includes(key)
+    )
+      return;
+    if (key === "enter") focusNotebookCell(cell.id, true);
+    else if (key === "arrowup" || key === "k")
+      focusNotebookCell(tab.cells[Math.max(0, index - 1)].id);
+    else if (key === "arrowdown" || key === "j")
+      focusNotebookCell(
+        tab.cells[Math.min(tab.cells.length - 1, index + 1)].id,
+      );
+    else if (key === "a" || key === "b") {
+      if (!e.repeat) insertNotebookCell(index + (key === "b" ? 1 : 0));
+    } else if (key === "d") {
+      if (!e.repeat) {
+        if (
+          previousDelete?.cellId === cell.id &&
+          Date.now() - previousDelete.time < 700
+        )
+          deleteNotebookCell(cell.id);
+        else deleteKey.current = { cellId: cell.id, time: Date.now() };
+      }
+    } else if (key === "z") undoNotebookDelete();
+    else if (key === "h" || key === "?" || (key === "/" && e.shiftKey))
+      setHelp(true);
+    else if (key === "s") void save(tab);
+    else if (key === "m" || key === "y") {
+      if (!busy.current.has(tab.id))
+        patch(tab.id, (t) =>
+          mutateCells(
+            t,
+            t.cells.map((c) =>
+              c.id === cell.id
+                ? { ...c, kind: key === "m" ? "markdown" : "sql" }
+                : c,
+            ),
+          ),
+        );
+      focusNotebookCell(cell.id);
+    } else if (e.key.length !== 1) return;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  function runNotebookAndAdvance(
+    e: ReactKeyboardEvent<HTMLElement>,
+    cell: Cell,
+    index: number,
+  ) {
+    if (e.key !== "Enter" || e.nativeEvent.isComposing) return;
+    // Keep the app's Run All binding.
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey) return;
+    if (!e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) return;
+    const target = e.target as HTMLElement;
+    if (target !== e.currentTarget && !target.closest(".cm-content, textarea"))
+      return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (
+      !tab ||
+      busy.current.has(tab.id) ||
+      e.repeat ||
+      (cell.kind === "sql" && !tab.connectionId)
+    )
+      return;
+    if (cell.kind === "sql") void runCells(tab, [cell.id]);
+    if (e.altKey) insertNotebookCell(index + 1, true);
+    else if (e.ctrlKey || e.metaKey) focusNotebookCell(cell.id);
+    else if (index + 1 < tab.cells.length)
+      focusNotebookCell(tab.cells[index + 1].id);
+    else insertNotebookCell(index + 1, true);
   }
   async function deleteDocument(d: NonNullable<typeof deleting>) {
     const openTab = useWorkspace.getState().tabs.find((t) => t.id === d.id);
@@ -751,7 +930,13 @@ export default function App() {
       if (t.sessionId) await api.close(t.sessionId).catch(() => {});
       await sessionFor({ ...t, sessionId: undefined, disconnected: false });
       patch(t.id, (x) => ({
-        ...mutateCells(x, x.cells),
+        ...x,
+        executions: Object.fromEntries(
+          Object.entries(x.executions).map(([id, e]) => [
+            id,
+            { ...e, outdated: true },
+          ]),
+        ),
         disconnected: false,
       }));
     } catch (e) {
@@ -760,7 +945,16 @@ export default function App() {
   }
   async function resetSession(t: Tab) {
     await api.close(t.sessionId!);
-    patch(t.id, (x) => ({ ...mutateCells(x, x.cells), sessionId: undefined }));
+    patch(t.id, (x) => ({
+      ...x,
+      executions: Object.fromEntries(
+        Object.entries(x.executions).map(([id, e]) => [
+          id,
+          { ...e, outdated: true },
+        ]),
+      ),
+      sessionId: undefined,
+    }));
   }
   function refreshTable(t: Tab) {
     void runTable(t, t.tableSettings ?? defaultTableSettings);
@@ -1433,7 +1627,6 @@ export default function App() {
                     key={tab.id}
                     tab={tab}
                     onExecute={(settings) => void runTable(tab, settings)}
-                    onCount={() => void countTable(tab)}
                     onOpenReference={openReference}
                   />
                 )}
@@ -1544,7 +1737,7 @@ export default function App() {
                     />
                   </QueryPane>
                 ) : (
-                  <div className="notebook-document">
+                  <div className="notebook-document" ref={notebookRoot}>
                     <div className="notebook-heading">
                       <Input
                         className="notebook-title h-auto rounded-none border-0 bg-transparent dark:bg-transparent p-0 text-[2.4rem] md:text-[2.4rem] leading-tight shadow-none focus-visible:ring-0"
@@ -1576,10 +1769,51 @@ export default function App() {
                         return (
                           <section
                             key={cell.id}
+                            data-cell-id={cell.id}
+                            data-mode={
+                              focusedCell === cell.id ? notebookMode : undefined
+                            }
+                            tabIndex={
+                              focusedCell === cell.id ||
+                              (!tab.cells.some((c) => c.id === focusedCell) &&
+                                index === 0)
+                                ? 0
+                                : -1
+                            }
+                            aria-label={`Cell ${index + 1}, ${cell.kind === "sql" ? "SQL" : "Markdown"}`}
+                            onKeyDownCapture={(e) => {
+                              runNotebookAndAdvance(e, cell, index);
+                              if (!e.defaultPrevented)
+                                notebookKey(e, cell, index);
+                            }}
                             className={`notebook-cell ${cell.kind} ${focusedCell === cell.id ? "focused" : ""}`}
-                            onFocus={() => setFocusedCell(cell.id)}
+                            onFocus={(e) => {
+                              setFocusedCell(cell.id);
+                              setNotebookMode(
+                                (e.target as HTMLElement).closest(
+                                  ".cm-content, textarea",
+                                )
+                                  ? "edit"
+                                  : "command",
+                              );
+                            }}
+                            onClick={(e) => {
+                              const target = e.target as HTMLElement;
+                              if (
+                                !target.closest(
+                                  ".cm-editor, textarea, button, input, [role=grid], [role=combobox]",
+                                )
+                              )
+                                focusNotebookCell(cell.id);
+                            }}
                           >
                             <div className="cell-gutter">
+                              <span
+                                className="cell-position"
+                                aria-hidden="true"
+                              >
+                                {index + 1}
+                              </span>
                               {cell.kind === "sql" && (
                                 <>
                                   <Button
@@ -1610,155 +1844,156 @@ export default function App() {
                                 </>
                               )}
                             </div>
-                            <div className="cell-main">
-                              <div className="cell-toolbar">
-                                <span className="eyebrow">
-                                  {cell.kind === "sql" ? "SQL" : "MARKDOWN"}
-                                </span>
-                                {cell.kind === "markdown" && (
-                                  <Button
-                                    className="quiet small"
-                                    onClick={() =>
-                                      setMarkdownEditing(
-                                        markdownEditing === cell.id
-                                          ? null
-                                          : cell.id,
-                                      )
-                                    }
-                                  >
-                                    {markdownEditing === cell.id
-                                      ? "Done"
-                                      : "Edit"}
-                                  </Button>
-                                )}
-                                <Button
-                                  className="quiet icon"
-                                  aria-label={`Move cell ${index + 1} up`}
-                                  disabled={index === 0 || running}
-                                  onClick={() =>
-                                    patch(tab.id, (t) => {
-                                      const cells = [...t.cells];
-                                      [cells[index - 1], cells[index]] = [
-                                        cells[index],
-                                        cells[index - 1],
-                                      ];
-                                      return mutateCells(t, cells);
-                                    })
-                                  }
-                                >
-                                  <ArrowUp size={13} />
-                                </Button>
-                                <Button
-                                  className="quiet icon"
-                                  aria-label={`Move cell ${index + 1} down`}
-                                  disabled={
-                                    index === tab.cells.length - 1 || running
-                                  }
-                                  onClick={() =>
-                                    patch(tab.id, (t) => {
-                                      const cells = [...t.cells];
-                                      [cells[index], cells[index + 1]] = [
-                                        cells[index + 1],
-                                        cells[index],
-                                      ];
-                                      return mutateCells(t, cells);
-                                    })
-                                  }
-                                >
-                                  <ArrowDown size={13} />
-                                </Button>
-                                <Button
-                                  className="quiet icon"
-                                  aria-label={`Delete cell ${index + 1}`}
-                                  disabled={running}
-                                  onClick={() =>
-                                    patch(tab.id, (t) =>
-                                      mutateCells(
-                                        t,
-                                        t.cells.filter((c) => c.id !== cell.id),
-                                      ),
-                                    )
-                                  }
-                                >
-                                  <Trash2 size={13} />
-                                </Button>
-                              </div>
-                              {cell.kind === "sql" ? (
-                                <>
-                                  <SqlEditor
-                                    compact
-                                    value={cell.source}
-                                    onChange={(v) =>
-                                      editCell(tab.id, cell.id, v)
-                                    }
-                                    onRun={() => runCells(tab, [cell.id])}
-                                    catalog={currentCatalog}
-                                  />
-                                  {execution && (
-                                    <ExecutionView
-                                      compact
-                                      execution={execution}
-                                    />
+                            <div className="cell-body">
+                              <div className="cell-main">
+                                <div className="cell-toolbar">
+                                  <span className="eyebrow">
+                                    {cell.kind === "sql" ? "SQL" : "MARKDOWN"}
+                                  </span>
+                                  {cell.kind === "markdown" && (
+                                    <Button
+                                      className="quiet small"
+                                      onClick={() =>
+                                        setMarkdownEditing(
+                                          markdownEditing === cell.id
+                                            ? null
+                                            : cell.id,
+                                        )
+                                      }
+                                    >
+                                      {markdownEditing === cell.id
+                                        ? "Done"
+                                        : "Edit"}
+                                    </Button>
                                   )}
-                                </>
-                              ) : markdownEditing === cell.id ? (
-                                <Textarea
-                                  autoFocus
-                                  aria-label={`Markdown cell ${index + 1}`}
-                                  className="markdown-editor"
-                                  value={cell.source}
-                                  onChange={(e) =>
-                                    editCell(tab.id, cell.id, e.target.value)
-                                  }
-                                  onKeyDown={(e) => {
-                                    if (
-                                      (e.metaKey || e.ctrlKey) &&
-                                      e.key === "Enter"
-                                    ) {
-                                      e.preventDefault();
-                                      setMarkdownEditing(null);
+                                  <Button
+                                    className="quiet icon"
+                                    aria-label={`Move cell ${index + 1} up`}
+                                    disabled={index === 0 || running}
+                                    onClick={() =>
+                                      patch(tab.id, (t) => {
+                                        const cells = [...t.cells];
+                                        [cells[index - 1], cells[index]] = [
+                                          cells[index],
+                                          cells[index - 1],
+                                        ];
+                                        return mutateCells(t, cells);
+                                      })
                                     }
-                                  }}
-                                />
-                              ) : (
-                                <div
-                                  className="markdown-content"
-                                  onDoubleClick={() =>
-                                    setMarkdownEditing(cell.id)
-                                  }
-                                >
-                                  <ReactMarkdown
-                                    allowedElements={[
-                                      "h1",
-                                      "h2",
-                                      "h3",
-                                      "h4",
-                                      "p",
-                                      "strong",
-                                      "em",
-                                      "code",
-                                      "pre",
-                                      "ul",
-                                      "ol",
-                                      "li",
-                                      "blockquote",
-                                      "hr",
-                                      "a",
-                                      "br",
-                                      "del",
-                                    ]}
-                                    unwrapDisallowed
-                                    components={{
-                                      a: ({ children }) => (
-                                        <span className="markdown-link">
-                                          {children}
-                                        </span>
-                                      ),
-                                    }}
                                   >
-                                    {cell.source ||
-                                      "Double-click to write a note…"}
-                                  </ReactMarkdown>
+                                    <ArrowUp size={13} />
+                                  </Button>
+                                  <Button
+                                    className="quiet icon"
+                                    aria-label={`Move cell ${index + 1} down`}
+                                    disabled={
+                                      index === tab.cells.length - 1 || running
+                                    }
+                                    onClick={() =>
+                                      patch(tab.id, (t) => {
+                                        const cells = [...t.cells];
+                                        [cells[index], cells[index + 1]] = [
+                                          cells[index + 1],
+                                          cells[index],
+                                        ];
+                                        return mutateCells(t, cells);
+                                      })
+                                    }
+                                  >
+                                    <ArrowDown size={13} />
+                                  </Button>
+                                  <Button
+                                    className="quiet icon"
+                                    aria-label={`Delete cell ${index + 1}`}
+                                    disabled={running}
+                                    title="Delete cell (D, D in command mode)"
+                                    onClick={() => deleteNotebookCell(cell.id)}
+                                  >
+                                    <Trash2 size={13} />
+                                  </Button>
+                                </div>
+                                {cell.kind === "sql" ? (
+                                  <>
+                                    <SqlEditor
+                                      compact
+                                      onCommandMode={() =>
+                                        focusNotebookCell(cell.id)
+                                      }
+                                      value={cell.source}
+                                      onChange={(v) =>
+                                        editCell(tab.id, cell.id, v)
+                                      }
+                                      onRun={() => runCells(tab, [cell.id])}
+                                      catalog={currentCatalog}
+                                    />
+                                  </>
+                                ) : markdownEditing === cell.id ? (
+                                  <Textarea
+                                    autoFocus
+                                    aria-label={`Markdown cell ${index + 1}`}
+                                    className="markdown-editor"
+                                    value={cell.source}
+                                    onChange={(e) =>
+                                      editCell(tab.id, cell.id, e.target.value)
+                                    }
+                                    onKeyDown={(e) => {
+                                      if (
+                                        (e.metaKey || e.ctrlKey) &&
+                                        e.key === "Enter"
+                                      ) {
+                                        e.preventDefault();
+                                        setMarkdownEditing(null);
+                                      }
+                                    }}
+                                  />
+                                ) : (
+                                  <div
+                                    className="markdown-content"
+                                    onDoubleClick={() =>
+                                      setMarkdownEditing(cell.id)
+                                    }
+                                  >
+                                    <ReactMarkdown
+                                      allowedElements={[
+                                        "h1",
+                                        "h2",
+                                        "h3",
+                                        "h4",
+                                        "p",
+                                        "strong",
+                                        "em",
+                                        "code",
+                                        "pre",
+                                        "ul",
+                                        "ol",
+                                        "li",
+                                        "blockquote",
+                                        "hr",
+                                        "a",
+                                        "br",
+                                        "del",
+                                      ]}
+                                      unwrapDisallowed
+                                      components={{
+                                        a: ({ children }) => (
+                                          <span className="markdown-link">
+                                            {children}
+                                          </span>
+                                        ),
+                                      }}
+                                    >
+                                      {cell.source ||
+                                        "Double-click to write a note…"}
+                                    </ReactMarkdown>
+                                  </div>
+                                )}
+                              </div>
+                              {cell.kind === "sql" && execution && (
+                                <div className="notebook-output">
+                                  <ExecutionView
+                                    compact
+                                    execution={execution}
+                                  />
                                 </div>
                               )}
                             </div>
@@ -1909,38 +2144,89 @@ export default function App() {
           onSaved={(id, editedId) => void connectionSaved(id, editedId)}
         />
       )}
-      {help && (
-        <div className="help-popover">
-          <strong>Keyboard shortcuts</strong>
-          <Button
-            className="quiet icon"
-            aria-label="Close keyboard shortcuts"
-            onClick={() => setHelp(false)}
-          >
-            <X size={13} />
-          </Button>
-          {[
-            ["⌘ K", "Search or run a command"],
-            ["⌘ T", "New SQL document"],
-            ["⌘ ⇧ T", "New notebook"],
-            ["⌘ Enter", "Run SQL cell or query"],
-            ["⌘ ⇧ Enter", "Run all notebook cells"],
-            ["⌘ S", "Save document"],
-            ["⌘ O", "Import SQL"],
-            ["⌘ ,", "Settings"],
-            ["⌘ W", "Close tab (saves notebook)"],
-            ["⌘ \\", "Toggle sidebar"],
-            ["⇧ Arrows", "Extend grid selection"],
-            ["⌘ C", "Copy selected cells"],
-            ["Enter", "Inspect selected row"],
-          ].map(([k, v]) => (
-            <div key={k}>
-              <span>{v}</span>
-              <kbd>{k}</kbd>
-            </div>
-          ))}
-        </div>
-      )}
+      <Dialog open={help} onOpenChange={setHelp}>
+        <DialogContent className="shortcuts-dialog sm:max-w-xl">
+          <DialogTitle>Keyboard shortcuts</DialogTitle>
+          <DialogDescription>
+            Press Esc to select a notebook cell, then use a letter key. A and B
+            do not require Shift. Press Enter to edit again.
+          </DialogDescription>
+          <div className="shortcuts-sections">
+            <section>
+              <h3>Notebook · command mode</h3>
+              {[
+                ["A", "Insert cell above"],
+                ["B", "Insert cell below"],
+                ["D, D", "Delete cell (press D twice)"],
+                ["Z", "Undo cell deletion"],
+                ["↑ / K", "Select previous cell"],
+                ["↓ / J", "Select next cell"],
+                ["M", "Change to Markdown"],
+                ["Y", "Change to SQL"],
+                ["Enter", "Edit selected cell"],
+                ["S", "Save notebook"],
+                ["H / ?", "Show keyboard shortcuts"],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <span>{label}</span>
+                  <kbd>{key}</kbd>
+                </div>
+              ))}
+            </section>
+            <section>
+              <h3>Notebook · editing and execution</h3>
+              {[
+                ["Esc", "Leave editor and select cell"],
+                [
+                  "Shift + Enter",
+                  "Run and select next; create a cell at the end",
+                ],
+                ["Ctrl + Enter", "Run and stay on this cell"],
+                ["Alt + Enter", "Run and insert a cell below"],
+                ["Ctrl + Space", "Show SQL completions"],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <span>{label}</span>
+                  <kbd>{key}</kbd>
+                </div>
+              ))}
+            </section>
+            <section>
+              <h3>App</h3>
+              {[
+                ["⌘ / Ctrl + K", "Search or run a command"],
+                ["⌘ / Ctrl + T", "New SQL document"],
+                ["⌘ / Ctrl + Shift + T", "New notebook"],
+                ["⌘ / Ctrl + Enter", "Run SQL cell or query"],
+                ["⌘ / Ctrl + Shift + Enter", "Run all notebook cells"],
+                ["⌘ / Ctrl + S", "Save document"],
+                ["⌘ / Ctrl + O", "Import SQL"],
+                ["⌘ / Ctrl + ,", "Settings"],
+                ["⌘ / Ctrl + W", "Close tab"],
+                ["⌘ / Ctrl + \\", "Toggle sidebar"],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <span>{label}</span>
+                  <kbd>{key}</kbd>
+                </div>
+              ))}
+            </section>
+            <section>
+              <h3>Results grid</h3>
+              {[
+                ["Shift + Arrows", "Extend grid selection"],
+                ["⌘ / Ctrl + C", "Copy selected cells"],
+                ["Enter", "Inspect selected row"],
+              ].map(([key, label]) => (
+                <div key={key}>
+                  <span>{label}</span>
+                  <kbd>{key}</kbd>
+                </div>
+              ))}
+            </section>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

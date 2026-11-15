@@ -29,15 +29,19 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await page.goto("/");
     await page.getByTitle("Open commerce.customers").click();
     await expect(page.getByRole("gridcell").first()).toHaveText("1");
-    await expect(page.locator(".page-range")).toHaveText("1–500");
-    expect(queries().some((e) => /count\(\*\)/i.test(e.sql))).toBe(false);
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 1,000 rows");
+    expect(queries().some((e) => /count\(\*\)/i.test(e.sql))).toBe(true);
+    await expect(
+      page.getByRole("button", { name: /^(Recount|Count rows)$/ }),
+    ).toHaveCount(0);
     await page.getByRole("button", { name: "Next page", exact: true }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("501");
-    await expect(page.locator(".page-range")).toHaveText("501–1,000");
+    await expect(page.locator(".page-range")).toHaveText(
+      "501–1,000 of 1,000 rows",
+    );
     await expect(
       page.getByRole("button", { name: "Next page", exact: true }),
     ).toBeDisabled();
-    await page.getByRole("button", { name: "Count rows", exact: true }).click();
     await expect(page.locator(".page-range")).toHaveText(
       "501–1,000 of 1,000 rows",
     );
@@ -66,11 +70,22 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await page.getByLabel("Filter value").fill("customer.99@example.test");
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("99");
-    await expect(
-      page.getByRole("button", { name: "Count rows", exact: true }),
-    ).toBeVisible();
-    await page.getByRole("button", { name: "Count rows", exact: true }).click();
     await expect(page.locator(".page-range")).toHaveText("1–1 of 1 rows");
+
+    await page
+      .getByRole("button", { name: "Clear filter", exact: true })
+      .click();
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 1,000 rows");
+    const countsBefore = queries().filter((e) =>
+      /count\(\*\)/i.test(e.sql),
+    ).length;
+    await page
+      .getByRole("button", { name: "Refresh table data", exact: true })
+      .click();
+    await expect
+      .poll(() => queries().filter((e) => /count\(\*\)/i.test(e.sql)).length)
+      .toBe(countsBefore + 1);
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 1,000 rows");
 
     const action = await page
       .getByRole("button", { name: "Import SQL", exact: true })
@@ -96,7 +111,7 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await page
       .getByRole("button", { name: "Refresh table data", exact: true })
       .click();
-    await expect(page.locator(".page-range")).toHaveText("1–500");
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 8,000 rows");
     await expect(page.getByRole("grid")).toHaveCSS(
       "background-color",
       "rgb(27, 30, 40)",

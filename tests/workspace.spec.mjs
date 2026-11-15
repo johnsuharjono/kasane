@@ -150,14 +150,14 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     await page.getByTitle("Open commerce.customers").click();
     await expect(page.getByRole("grid")).toBeVisible();
     await expect(page.locator(".cm-content")).toHaveCount(0);
-    expect(queries.length).toBe(countBeforeOpen + 1);
+    await expect.poll(() => queries.length).toBe(countBeforeOpen + 2);
     await page.getByTitle("Open commerce.customers").click();
     await expect(
       page
         .getByRole("navigation")
         .getByRole("button", { name: "customers", exact: true }),
     ).toHaveCount(1);
-    expect(queries.length).toBe(countBeforeOpen + 1);
+    await expect.poll(() => queries.length).toBe(countBeforeOpen + 2);
     await expect(
       page.getByRole("combobox", { name: "Document connection" }),
     ).toHaveCount(0);
@@ -467,7 +467,7 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     );
     await expect(
       page.getByText("Outdated results", { exact: false }),
-    ).toHaveCount(2);
+    ).toHaveCount(1);
     await replaceEditor(
       page.locator(".notebook-cell .cm-content").first(),
       "SELECT does_not_exist",

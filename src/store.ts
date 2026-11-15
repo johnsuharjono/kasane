@@ -156,12 +156,13 @@ export const useWorkspace = create<Workspace>()(
         }),
       editCell: (id, cellId, source) =>
         get().patch(id, (t) => {
-          const index = t.cells.findIndex((c) => c.id === cellId);
           const executions = { ...t.executions };
-          t.cells.slice(index).forEach((c) => {
-            if (executions[c.id])
-              executions[c.id] = { ...executions[c.id], outdated: true };
-          });
+          const execution = executions[cellId];
+          if (execution)
+            executions[cellId] = {
+              ...execution,
+              outdated: execution.source !== source,
+            };
           return {
             ...t,
             dirty: true,
@@ -264,7 +265,16 @@ export function mutateCells(tab: Tab, cells: Cell[]): Tab {
     executions: Object.fromEntries(
       Object.entries(tab.executions)
         .filter(([id]) => cells.some((c) => c.id === id))
-        .map(([id, e]) => [id, { ...e, outdated: true }]),
+        .map(([id, e]) => {
+          const cell = cells.find((c) => c.id === id)!;
+          const previous = tab.cells.find((c) => c.id === id);
+          return [
+            id,
+            previous?.kind !== cell.kind || previous?.source !== cell.source
+              ? { ...e, outdated: true }
+              : e,
+          ];
+        }),
     ),
   };
 }

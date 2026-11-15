@@ -1245,44 +1245,6 @@
     margin-top: 12px;
     line-height: 1.6;
   }
-  .help-popover {
-    position: fixed;
-    right: 17px;
-    top: 51px;
-    z-index: 30;
-    background: var(--background);
-    border: 1px solid var(--border);
-    border-radius: 9px;
-    padding: 20px;
-    box-shadow: 0 10px 40px
-      color-mix(in srgb, var(--foreground) 13%, transparent);
-    width: 310px;
-  }
-  .help-popover > strong {
-    font-size: 12px;
-    color: var(--muted-foreground);
-    display: block;
-    margin-bottom: 19px;
-    font-weight: 500;
-  }
-  .help-popover > [data-slot="button"] {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-  }
-  .help-popover > div {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-top: 13px;
-    font-size: 11px;
-    color: var(--muted-foreground);
-  }
-  .help-popover kbd {
-    background: var(--muted);
-    border-color: var(--border);
-    color: var(--muted-foreground);
-  }
   @media (max-width: 1100px) {
     .app {
       grid-template-columns: 220px minmax(0, 1fr);
@@ -3012,5 +2974,105 @@
   }
   .destructive-item {
     color: var(--error-foreground);
+  }
+}
+
+@layer components {
+  .notebook-cell {
+    position: relative;
+  }
+  .notebook-cell:focus {
+    outline: none;
+  }
+  .notebook-cell.focused::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    border-radius: 3px;
+    background: var(--primary);
+  }
+  .notebook-cell.focused[data-mode="edit"]::before {
+    background: var(--success);
+  }
+  .notebook-cell.focused > .cell-body > .cell-main,
+  .notebook-cell.markdown.focused > .cell-body > .cell-main {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--focus-ring);
+  }
+  .notebook-cell.focused[data-mode="edit"] > .cell-body > .cell-main {
+    border-color: var(--success);
+  }
+  .cell-body {
+    flex: 1;
+    min-width: 0;
+  }
+  .cell-position {
+    opacity: 0.65;
+    cursor: pointer;
+  }
+  .notebook-cell.focused .cell-position {
+    color: var(--primary);
+    opacity: 1;
+    font-weight: 600;
+  }
+  .notebook-cell .cell-gutter {
+    position: sticky;
+    top: 12px;
+    align-self: flex-start;
+  }
+  .notebook-cell .cell-toolbar {
+    position: relative;
+    top: auto;
+    right: auto;
+    opacity: 1;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    min-height: 30px;
+    padding: 3px 6px;
+    justify-content: flex-end;
+    background: transparent;
+  }
+  .notebook-cell .cell-toolbar > .eyebrow {
+    margin-right: auto;
+  }
+  .notebook-cell.markdown .markdown-content {
+    padding: 10px 12px;
+    cursor: text;
+  }
+  .notebook-cell .notebook-output {
+    margin-top: 8px;
+  }
+  .notebook-cell .notebook-output .execution-view {
+    border-top: 0;
+  }
+  .shortcuts-dialog {
+    max-height: min(85vh, 780px);
+    overflow-y: auto;
+  }
+  .shortcuts-sections {
+    display: grid;
+    gap: 20px;
+  }
+  .shortcuts-sections h3 {
+    font-weight: 600;
+    margin: 0 0 8px;
+    font-size: 13px;
+  }
+  .shortcuts-sections section > div {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 5px 0;
+    font-size: 12px;
+  }
+  .shortcuts-sections kbd {
+    white-space: nowrap;
+    color: var(--muted-foreground);
+    font-family: var(--mono);
+    font-size: 11px;
   }
 }

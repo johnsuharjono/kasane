@@ -35,8 +35,7 @@ export function ExecutionView({
     <div className={`execution-view ${e.state}`}>
       {e.outdated && (
         <div className="outdated-banner">
-          Outdated results · the source, cell order, connection, or session has
-          changed.
+          Outdated results · the source, connection, or session has changed.
         </div>
       )}
       {e.state === "running" && (
