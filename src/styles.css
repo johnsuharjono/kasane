@@ -2738,4 +2738,255 @@
     outline: 2px solid var(--foreground);
     outline-offset: 2px;
   }
+
+  /* Connections manager */
+  .connections-dialog {
+    display: flex;
+    height: min(620px, calc(100vh - 80px));
+    overflow: hidden;
+    border-radius: 14px;
+  }
+  .connections-list {
+    width: 260px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--chrome);
+    border-right: 1px solid var(--border);
+  }
+  .connections-list-heading {
+    padding: 20px 18px 12px;
+  }
+  .connections-list-heading h2 {
+    margin: 0;
+    font:
+      500 22px/1.2 "Newsreader Variable",
+      Georgia,
+      serif;
+    color: var(--foreground);
+  }
+  .connections-list-heading p {
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .connections-items {
+    flex: 1;
+    overflow: auto;
+    padding: 4px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .connections-items > button {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    padding: 8px;
+    border-radius: 8px;
+    background: transparent;
+    text-align: left;
+  }
+  .connections-items > button:hover:not(:disabled) {
+    background: var(--sidebar-accent);
+  }
+  .connections-items > button[aria-selected="true"] {
+    background: var(--accent);
+  }
+  .connections-item-label {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .connections-item-label strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .connections-item-label small {
+    font: 11px var(--mono);
+    color: var(--muted-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .draft-mark {
+    background: var(--background);
+    color: var(--muted-foreground);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+  .connections-list-footer {
+    padding: 12px 10px 14px;
+    border-top: 1px solid var(--border);
+  }
+  .connections-list-footer .add-connection {
+    width: 100%;
+    border-style: dashed;
+    background: transparent;
+  }
+  .connection-editor {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--popover);
+  }
+  .connection-editor-heading {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px 16px 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+  .connection-editor-heading strong {
+    display: block;
+    font-size: 16px;
+    font-weight: 600;
+  }
+  .connection-editor-heading small {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 2px;
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .connection-mark.large {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .connection-editor-body {
+    flex: 1;
+    overflow: auto;
+    padding: 18px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .connection-editor-body label {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+  .connection-editor-body > label {
+    flex: none;
+  }
+  .connection-editor-body input {
+    height: 34px;
+    font-weight: 400;
+  }
+  .connection-editor-body .form-row {
+    gap: 12px;
+  }
+  .connection-editor-body .swatch-field {
+    margin: 0;
+  }
+  .connection-editor-body legend {
+    padding: 0;
+    margin-bottom: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--foreground);
+  }
+  .tls-field {
+    border: 0;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .tls-field small {
+    font-size: 12px;
+    color: var(--muted-foreground);
+  }
+  .segmented {
+    display: inline-flex;
+    align-self: flex-start;
+    padding: 3px;
+    border-radius: 8px;
+    background: var(--muted);
+  }
+  .segmented > button {
+    height: 28px;
+    padding: 0 14px;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--muted-foreground);
+    font-size: 12.5px;
+  }
+  .segmented > button[aria-checked="true"] {
+    background: var(--background);
+    color: var(--foreground);
+    font-weight: 500;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 12%, transparent);
+  }
+  .connection-editor-footer {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 14px 24px;
+    border-top: 1px solid var(--border);
+    background: color-mix(in srgb, var(--muted) 50%, var(--popover));
+  }
+  .test-result {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    font-size: 12.5px;
+    color: var(--muted-foreground);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .test-result.ok {
+    color: var(--success);
+  }
+  .test-result.failed {
+    color: var(--error-foreground);
+  }
+  [data-slot="button"].quiet.delete-connection {
+    color: var(--error-foreground);
+  }
+
+  /* Foreign keys, JSON previews, column picker */
+  .reference-link {
+    float: right;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: 8px;
+    padding: 0 6px;
+    border-radius: 5px;
+    background: transparent;
+    color: var(--primary);
+    font:
+      500 11.5px "DM Sans Variable",
+      sans-serif;
+  }
+  .reference-link:hover {
+    background: var(--accent);
+  }
+  .json-preview {
+    color: var(--muted-foreground);
+  }
+  .grid-cell.selected .json-preview {
+    color: var(--foreground);
+  }
+  .column-option {
+    font: 12px var(--mono);
+  }
 }

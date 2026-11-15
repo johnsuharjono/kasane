@@ -28,7 +28,11 @@ Tabs, saved-document libraries, active-tab selection, table filters, and explore
 
 ## Catalog extras
 
-The catalog query also returns `pg_class.reltuples` as an approximate row count for the sidebar; it is absent for views and never-analyzed tables, and no `COUNT(*)` runs. Result columns carry `isEnum` from the driver's type kind so enum and boolean values render as neutral chips without an extra catalog query.
+The catalog query also returns `pg_class.reltuples` as an approximate row count for the sidebar; it is absent for views and never-analyzed tables, and no `COUNT(*)` runs. Single-column foreign keys come back as `fk_schema`/`fk_table`/`fk_column`; result headers show the target, and the row inspector's **Open …** link opens the referenced table filtered with `equals` on that key. Composite keys are not linked. Result columns carry `isEnum` from the driver's type kind so enum and boolean values render as neutral chips without an extra catalog query.
+
+## Connection TLS and testing
+
+`tlsMode` is `disable`, `require` (encrypted, certificate and host name not checked) or `verify-full`. Older connection files only have `tls`; `true` maps to `verify-full`, and saves keep `tls` set whenever encryption is on. **Test connection** opens a throwaway session with the unsaved settings, runs `SHOW server_version`, and closes it; without a typed password it uses the stored Keychain item.
 
 ## Value boundary and execution
 

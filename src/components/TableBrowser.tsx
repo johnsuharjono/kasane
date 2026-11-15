@@ -6,6 +6,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronsLeft,
+  Columns3,
   Filter,
   Lock,
   X,
@@ -19,18 +20,32 @@ import {
   tableCountQuery,
 } from "../table-query";
 import { usePreferences } from "../preferences";
-import type { Tab, TableSettings } from "../types";
+import type { ColumnReference, Tab, TableSettings } from "../types";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 export function TableBrowser({
   tab,
   onExecute,
   onCount,
+  onOpenReference,
 }: {
   tab: Tab;
   onExecute: (settings: TableSettings) => void;
   onCount: () => void;
+  onOpenReference: (reference: ColumnReference, value: string) => void;
 }) {
   const settings = tab.tableSettings ?? defaultTableSettings;
   const [draft, setDraft] = useState(settings);
+  // Filters can change from outside (following a foreign key); mirror them.
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings.filterColumn, settings.filterOperator, settings.filterValue]);
   const execution = tab.executions["table-data"];
   const { autoPreview } = usePreferences();
   const running = Object.values(tab.executions).some(
@@ -88,8 +103,16 @@ export function TableBrowser({
     equals: "equals",
     "is-null": "is null",
   }[settings.filterOperator];
+  const hidden = settings.hiddenColumns ?? [];
+  function setHidden(hiddenColumns: string[]) {
+    onExecute({ ...settings, hiddenColumns });
+  }
   function clearFilter() {
-    const next = { ...defaultTableSettings, sort: settings.sort };
+    const next = {
+      ...defaultTableSettings,
+      sort: settings.sort,
+      hiddenColumns: settings.hiddenColumns,
+    };
     setDraft(next);
     onExecute(next);
   }
@@ -101,7 +124,12 @@ export function TableBrowser({
             className="table-filters"
             onSubmit={(e) => {
               e.preventDefault();
-              onExecute({ ...draft, page: 0, sort: settings.sort });
+              onExecute({
+                ...draft,
+                page: 0,
+                sort: settings.sort,
+                hiddenColumns: settings.hiddenColumns,
+              });
             }}
           >
             <Filter size={14} aria-hidden="true" />
@@ -187,6 +215,47 @@ export function TableBrowser({
           </span>
         )}
         <span className="spacer" />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button className="quiet small" aria-label="Choose columns" />
+            }
+          >
+            <Columns3 size={13} aria-hidden="true" />
+            Columns {tab.relation!.columns.length - hidden.length}/
+            {tab.relation!.columns.length}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 min-w-52">
+            {tab.relation!.columns.map((c) => (
+              <DropdownMenuCheckboxItem
+                key={c.name}
+                closeOnClick={false}
+                checked={!hidden.includes(c.name)}
+                disabled={
+                  !hidden.includes(c.name) &&
+                  hidden.length === tab.relation!.columns.length - 1
+                }
+                onCheckedChange={(checked) =>
+                  setHidden(
+                    checked
+                      ? hidden.filter((h) => h !== c.name)
+                      : [...hidden, c.name],
+                  )
+                }
+              >
+                <span className="column-option">{c.name}</span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {hidden.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setHidden([])}>
+                  Show all columns
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <span className="row-count" aria-live="polite">
           {total != null ? (
             <>
@@ -216,6 +285,7 @@ export function TableBrowser({
         <ExecutionView
           execution={execution}
           relation={tab.relation}
+          onOpenReference={onOpenReference}
           rowOffset={page * pageSize}
           sort={settings.sort}
           onSort={sort}

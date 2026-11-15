@@ -9,6 +9,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import {
   ArrowDown,
   ArrowUp,
+  ArrowUpRight,
   Check,
   Copy,
   KeyRound,
@@ -16,7 +17,13 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./Button";
-import type { Column, Relation, Result, TableSettings } from "../types";
+import type {
+  Column,
+  ColumnReference,
+  Relation,
+  Result,
+  TableSettings,
+} from "../types";
 import { quoteIdent } from "../api";
 const features = tableFeatures({ columnSizingFeature });
 // Two-line header: column name above its type.
@@ -29,6 +36,28 @@ const display = (c: Column, v: string) =>
 // Untyped literals coerce to the target column type in INSERT … VALUES.
 const sqlLiteral = (v: string | null) =>
   v === null ? "NULL" : `'${v.replaceAll("'", "''")}'`;
+const isJSON = (c: Column) => c.dataType === "json" || c.dataType === "jsonb";
+/** One-line preview: {city: "Palm Coast", street: "…"} with nested values elided. */
+function compactJSON(v: string) {
+  let value: unknown;
+  try {
+    value = JSON.parse(v);
+  } catch {
+    return v;
+  }
+  const scalar = (x: unknown) =>
+    x !== null && typeof x === "object"
+      ? Array.isArray(x)
+        ? `[${x.length}]`
+        : "{…}"
+      : JSON.stringify(x);
+  if (Array.isArray(value)) return `[${value.map(scalar).join(", ")}]`;
+  if (value !== null && typeof value === "object")
+    return `{${Object.entries(value)
+      .map(([k, x]) => `${k}: ${scalar(x)}`)
+      .join(", ")}}`;
+  return v;
+}
 function pretty(c: Column, v: string) {
   if (c.dataType !== "json" && c.dataType !== "jsonb") return v;
   try {
@@ -46,9 +75,11 @@ export const ResultsGrid = memo(function ResultsGrid({
   compact = false,
   rowOffset = 0,
   relation,
+  onOpenReference,
 }: {
   result: Result;
   relation?: Relation;
+  onOpenReference?: (reference: ColumnReference, value: string) => void;
   compact?: boolean;
   rowOffset?: number;
   sort?: TableSettings["sort"];
@@ -115,6 +146,11 @@ export const ResultsGrid = memo(function ResultsGrid({
     relation?.columns
       .filter((c) => c.primaryKeyPosition !== undefined)
       .map((c) => c.name),
+  );
+  const references = new Map(
+    relation?.columns
+      .filter((c) => c.references)
+      .map((c) => [c.name, c.references!]),
   );
   async function writeClipboard(text: string) {
     try {
@@ -340,7 +376,11 @@ export const ResultsGrid = memo(function ResultsGrid({
                     />
                   )}
                 </span>
-                <small>{result.columns[v.index].dataType}</small>
+                <small>
+                  {result.columns[v.index].dataType}
+                  {references.has(result.columns[v.index].name) &&
+                    ` → ${references.get(result.columns[v.index].name)!.table}`}
+                </small>
                 <div
                   className="resize-handle"
                   role="separator"
@@ -435,6 +475,10 @@ export const ResultsGrid = memo(function ResultsGrid({
                         <span className="value-chip">
                           {display(column, value)}
                         </span>
+                      ) : isJSON(column) ? (
+                        <span className="json-preview">
+                          {compactJSON(value.slice(0, 2000)).slice(0, 160)}
+                        </span>
                       ) : value.length > 160 ? (
                         `${value.slice(0, 160)}…`
                       ) : (
@@ -509,6 +553,20 @@ export const ResultsGrid = memo(function ResultsGrid({
                         {c.name} <small>{c.dataType}</small>
                       </dt>
                       <dd>
+                        {v !== null &&
+                          references.has(c.name) &&
+                          onOpenReference && (
+                            <button
+                              className="reference-link"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onOpenReference(references.get(c.name)!, v);
+                              }}
+                            >
+                              Open {references.get(c.name)!.table}
+                              <ArrowUpRight size={12} aria-hidden="true" />
+                            </button>
+                          )}
                         {v === null ? (
                           <span className="value-chip null">NULL</span>
                         ) : isChip(c) ? (

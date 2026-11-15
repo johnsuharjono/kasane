@@ -86,6 +86,7 @@ import {
   type SQLDocument,
   type Relation,
   type Tab,
+  type ColumnReference,
 } from "./types";
 export default function App() {
   const {
@@ -261,17 +262,17 @@ export default function App() {
     );
   }
 
-  async function connectionSaved(savedId?: string) {
+  async function connectionSaved(savedId?: string, editedId?: string) {
     try {
-      if (editConnection) {
-        catalogCache.current.delete(editConnection.id);
-        if (selected === editConnection.id) {
+      if (editedId) {
+        catalogCache.current.delete(editedId);
+        if (selected === editedId) {
           setBrowser(undefined);
           connect();
         }
         for (const document of useWorkspace
           .getState()
-          .tabs.filter((t) => t.connectionId === editConnection.id)) {
+          .tabs.filter((t) => t.connectionId === editedId)) {
           if (document.sessionId)
             await api.close(document.sessionId).catch(() => {});
           patch(document.id, (t) => ({
@@ -633,6 +634,7 @@ export default function App() {
   function openTable(
     r: Relation,
     view: "data" | "query" | "structure" = "data",
+    settings?: TableSettings,
   ) {
     if (view === "query") {
       add(
@@ -649,6 +651,11 @@ export default function App() {
     if (existing) {
       activate(existing.id);
       patch(existing.id, (t) => ({ ...t, view, relation: r }));
+      if (settings)
+        void runTable(
+          { ...existing, view, relation: r, restored: false },
+          settings,
+        );
       return;
     }
     add(
@@ -663,13 +670,31 @@ export default function App() {
       tableKey,
       relation: r,
       view,
-      tableSettings: {
+      tableSettings: settings ?? {
         page: 0,
         filterColumn: "",
         filterOperator: "contains",
         filterValue: "",
       },
     }));
+  }
+  /** Follows a foreign key: opens the referenced table filtered to one value. */
+  function openReference(reference: ColumnReference, value: string) {
+    const target = catalog.find(
+      (r) => r.schema === reference.schema && r.name === reference.table,
+    );
+    if (!target) {
+      setNotice(
+        `${reference.schema}.${reference.table} is not in this connection's catalog.`,
+      );
+      return;
+    }
+    openTable(target, "data", {
+      ...defaultTableSettings,
+      filterColumn: reference.column,
+      filterOperator: "equals",
+      filterValue: value,
+    });
   }
   function newCell(kind: "sql" | "markdown") {
     if (!tab) return;
@@ -1358,6 +1383,7 @@ export default function App() {
                     tab={tab}
                     onExecute={(settings) => void runTable(tab, settings)}
                     onCount={() => void countTable(tab)}
+                    onOpenReference={openReference}
                   />
                 )}
               </>
@@ -1789,10 +1815,11 @@ export default function App() {
       {connectionDialog && (
         <ConnectionDialog
           key={editConnection?.id ?? "new"}
-          initial={editConnection}
+          connections={connections}
+          initialId={editConnection?.id}
           open={connectionDialog}
           onOpenChange={setConnectionDialog}
-          onSaved={(id) => void connectionSaved(id)}
+          onSaved={(id, editedId) => void connectionSaved(id, editedId)}
         />
       )}
       {help && (

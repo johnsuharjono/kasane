@@ -1,6 +1,11 @@
 import { Layers } from "lucide-react";
 import { ResultsGrid } from "./ResultsGrid";
-import type { Execution, Relation, TableSettings } from "../types";
+import type {
+  ColumnReference,
+  Execution,
+  Relation,
+  TableSettings,
+} from "../types";
 export function ExecutionView({
   execution: e,
   sort,
@@ -8,9 +13,11 @@ export function ExecutionView({
   compact = false,
   rowOffset = 0,
   relation,
+  onOpenReference,
 }: {
   execution?: Execution;
   relation?: Relation;
+  onOpenReference?: (reference: ColumnReference, value: string) => void;
   compact?: boolean;
   rowOffset?: number;
   sort?: TableSettings["sort"];
@@ -60,6 +67,7 @@ export function ExecutionView({
           rowOffset={rowOffset}
           result={e.result}
           relation={relation}
+          onOpenReference={onOpenReference}
           sort={sort}
           onSort={onSort}
         />
