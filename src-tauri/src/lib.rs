@@ -1,7 +1,7 @@
 mod db;
 mod menu;
 mod sql_documents;
-use db::{Connection, DbError, QueryResult, Session};
+use db::{Connection, DbError, QueryResult, Session, CONNECTION_COLORS};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tauri::{Manager, State};
@@ -49,6 +49,11 @@ async fn save_connection(
     password: Option<String>,
 ) -> Result<(), DbError> {
     valid_id(&connection.id)?;
+    if let Some(color) = &connection.color {
+        if !CONNECTION_COLORS.contains(&color.as_str()) {
+            return Err(err("Unknown connection color"));
+        }
+    }
     let _guard = state.files.lock().await;
     if let Some(password) = password {
         let id = connection.id.clone();

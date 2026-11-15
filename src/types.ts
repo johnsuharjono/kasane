@@ -6,8 +6,16 @@ export type Connection = {
   database: string;
   username: string;
   tls: boolean;
+  color?: ConnectionColor;
 };
-export type Column = { name: string; dataType: string; oid: number };
+export type ConnectionColor =
+  "gray" | "blue" | "teal" | "green" | "amber" | "orange" | "rose" | "violet";
+export type Column = {
+  name: string;
+  dataType: string;
+  oid: number;
+  isEnum?: boolean;
+};
 export type Result = {
   columns: Column[];
   rows: (string | null)[][];
@@ -28,6 +36,8 @@ export type Relation = {
   schema: string;
   name: string;
   kind: string;
+  /** pg_class.reltuples; absent for views and never-analyzed tables. */
+  estimatedRows?: number;
   columns: {
     name: string;
     type: string;
@@ -55,6 +65,8 @@ export type Execution = {
   requestId: string;
   source: string;
   outdated?: boolean;
+  /** Notebook execution counter shown as [n] beside the cell. */
+  runNumber?: number;
   hasNextPage?: boolean;
   result?: Result;
   error?: DbError;

@@ -115,3 +115,23 @@
   --warning-foreground: #fffac2;
   --success: #5de4c7;
 }
+:root {
+  /* Connection swatches; white text stays above 4.5:1 on each. */
+  --connection-gray: #66708a;
+  --connection-blue: #2f5f9e;
+  --connection-teal: #1c6e78;
+  --connection-green: #1e7462;
+  --connection-amber: #8f6210;
+  --connection-orange: #a9501d;
+  --connection-rose: #a63a63;
+  --connection-violet: #6b4fa0;
+  --chip: #eef1f6;
+  --chip-foreground: #3f4a63;
+  --chrome: #f1f3f7;
+  --focus-ring: color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.dark {
+  --chip: #2a3040;
+  --chip-foreground: #c5d5ef;
+  --chrome: #181b24;
+}

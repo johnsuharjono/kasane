@@ -47,14 +47,17 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
         types,
       });
       await client.connect();
-      const names = new Map(
-        (await client.query("SELECT oid::text,typname FROM pg_type")).rows.map(
-          (r) => [Number(r.oid), r.typname],
-        ),
+      const typeRows = (
+        await client.query("SELECT oid::text,typname,typtype FROM pg_type")
+      ).rows;
+      const names = new Map(typeRows.map((r) => [Number(r.oid), r.typname]));
+      const enums = new Set(
+        typeRows.filter((r) => r.typtype === "e").map((r) => Number(r.oid)),
       );
       sessions.set(args.sessionId, {
         client,
         names,
+        enums,
         connectionId: c.id,
         database: c.database,
       });
@@ -109,6 +112,7 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
           name: f.name,
           dataType: s.names.get(f.dataTypeID),
           oid: f.dataTypeID,
+          isEnum: s.enums.has(f.dataTypeID),
         })),
         rows,
         durationMs: performance.now() - start,

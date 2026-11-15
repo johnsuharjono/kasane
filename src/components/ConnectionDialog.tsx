@@ -8,10 +8,15 @@ import {
 } from "./ui/dialog";
 import { Input } from "./ui/input";
 import { Checkbox } from "./ui/checkbox";
-import { X, Database, ShieldCheck } from "lucide-react";
+import { X, Database, ShieldCheck, Check } from "lucide-react";
 import { Button } from "./Button";
 import { api } from "../api";
 import { asError, uid, type Connection } from "../types";
+import {
+  CONNECTION_COLORS,
+  connectionColor,
+  initials,
+} from "../connection-colors";
 export function ConnectionDialog({
   open,
   onOpenChange,
@@ -68,8 +73,12 @@ export function ConnectionDialog({
           }}
         >
           <div className="dialog-heading">
-            <div className="dialog-symbol">
-              <Database size={22} />
+            <div
+              className="dialog-symbol connection-mark"
+              style={{ background: connectionColor(form) }}
+              aria-hidden="true"
+            >
+              {form.name.trim() ? initials(form.name) : <Database size={20} />}
             </div>
             <DialogClose
               render={
@@ -95,6 +104,29 @@ export function ConnectionDialog({
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
           </label>
+          <fieldset className="swatch-field">
+            <legend>Color</legend>
+            <div className="swatches" role="radiogroup" aria-label="Color">
+              {CONNECTION_COLORS.map((c) => {
+                const checked = (form.color ?? "gray") === c.id;
+                return (
+                  <button
+                    key={c.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={checked}
+                    aria-label={c.label}
+                    title={c.label}
+                    className="swatch"
+                    style={{ background: connectionColor({ color: c.id }) }}
+                    onClick={() => setForm({ ...form, color: c.id })}
+                  >
+                    {checked && <Check size={13} strokeWidth={3} />}
+                  </button>
+                );
+              })}
+            </div>
+          </fieldset>
           <div className="form-row">
             <label>
               Host

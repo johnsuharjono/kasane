@@ -3,7 +3,7 @@ use postgres_native_tls::MakeTlsConnector;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Mutex;
-use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
+use tokio_postgres::{types::Kind, CancelToken, Client, SimpleQueryMessage};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,7 +15,13 @@ pub struct Connection {
     pub database: String,
     pub username: String,
     pub tls: bool,
+    /// Name from the frontend's fixed swatch palette; absent means neutral.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
+pub const CONNECTION_COLORS: [&str; 8] = [
+    "gray", "blue", "teal", "green", "amber", "orange", "rose", "violet",
+];
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DbError {
@@ -137,6 +143,7 @@ impl Session {
                 name: c.name().to_owned(),
                 data_type: c.type_().name().to_owned(),
                 oid: c.type_().oid(),
+                is_enum: matches!(c.type_().kind(), Kind::Enum(_)),
             })
             .collect();
         // PostgreSQL's text protocol preserves numeric precision, timestamp microseconds, bytea, arrays and unknown types.
@@ -191,6 +198,7 @@ pub struct Column {
     pub name: String,
     pub data_type: String,
     pub oid: u32,
+    pub is_enum: bool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,7 +212,7 @@ pub struct QueryResult {
     pub bytes: usize,
 }
 
-pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
+pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position, CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint::text END AS estimated_rows FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
 
 #[cfg(test)]
 mod tests {
@@ -220,6 +228,7 @@ mod tests {
             database: "kasane_dev".into(),
             username: "kasane".into(),
             tls: false,
+            color: None,
         };
         let s = Session::connect(&c, "kasane_dev_only").await.unwrap();
         let catalog = s.catalog().await.unwrap();

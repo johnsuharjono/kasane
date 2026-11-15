@@ -53,6 +53,7 @@ export const api = {
       type,
       required,
       primaryKeyPosition,
+      estimatedRows,
     ] of result.rows) {
       const key = JSON.stringify([schema, name]);
       if (!map.has(key))
@@ -60,6 +61,7 @@ export const api = {
           schema: schema!,
           name: name!,
           kind: kind!,
+          estimatedRows: estimatedRows ? Number(estimatedRows) : undefined,
           columns: [],
         });
       map.get(key)!.columns.push({

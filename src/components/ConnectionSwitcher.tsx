@@ -1,6 +1,6 @@
 import {
   Check,
-  ChevronDown,
+  ChevronsUpDown,
   Database,
   Plus,
   RefreshCw,
@@ -16,6 +16,7 @@ import {
   DropdownMenuSeparator,
 } from "./ui/dropdown-menu";
 import type { Connection } from "../types";
+import { connectionColor, initials } from "../connection-colors";
 
 export function ConnectionSwitcher({
   connections,
@@ -51,7 +52,17 @@ export function ConnectionSwitcher({
           />
         }
       >
-        <Database size={17} />
+        {active ? (
+          <span
+            className="connection-mark"
+            style={{ background: connectionColor(active) }}
+            aria-hidden="true"
+          >
+            {initials(active.name)}
+          </span>
+        ) : (
+          <Database size={17} />
+        )}
         <span className="connection-switcher-label">
           <strong>{active?.name ?? "Choose a connection"}</strong>
           <small>
@@ -62,7 +73,7 @@ export function ConnectionSwitcher({
                 : "PostgreSQL"}
           </small>
         </span>
-        <ChevronDown size={14} />
+        <ChevronsUpDown size={14} />
       </DropdownMenuTrigger>
       <DropdownMenuContent className="min-w-64" align="start">
         {connections.map((c) => (
@@ -71,7 +82,11 @@ export function ConnectionSwitcher({
             onClick={() => onSelect(c.id)}
             aria-label={`Switch to ${c.name}`}
           >
-            <Database size={15} />
+            <span
+              className="connection-dot"
+              style={{ background: connectionColor(c) }}
+              aria-hidden="true"
+            />
             <span className="connection-menu-label">
               <strong>{c.name}</strong>
               <small>
