@@ -845,7 +845,13 @@ export default function App() {
     <div
       className={`app ${sidebar ? "" : "sidebar-hidden"}`}
       style={
-        { "--connection": connectionColor(activeWorkspace) } as CSSProperties
+        {
+          // Gray is the "no color" default, so it gets no title bar accent.
+          "--connection":
+            activeWorkspace?.color && activeWorkspace.color !== "gray"
+              ? connectionColor(activeWorkspace)
+              : "transparent",
+        } as CSSProperties
       }
     >
       <header className="titlebar" data-tauri-drag-region>
