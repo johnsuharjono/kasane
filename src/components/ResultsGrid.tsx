@@ -19,6 +19,8 @@ import { Button } from "./Button";
 import type { Column, Relation, Result, TableSettings } from "../types";
 import { quoteIdent } from "../api";
 const features = tableFeatures({ columnSizingFeature });
+// Two-line header: column name above its type.
+const HEADER_HEIGHT = 46;
 type Point = { row: number; col: number };
 const isNumber = (c: Column) => /int|numeric|float/.test(c.dataType);
 const isChip = (c: Column) => c.isEnum || c.dataType === "bool";
@@ -90,7 +92,7 @@ export const ResultsGrid = memo(function ResultsGrid({
     getScrollElement: () => scroll.current,
     estimateSize: () => 32,
     overscan: 8,
-    scrollMargin: 36,
+    scrollMargin: HEADER_HEIGHT,
   });
   const horizontal = useVirtualizer({
     useAnimationFrameWithResizeObserver: true,
@@ -229,7 +231,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                   360,
                   Math.max(
                     result.rows.length ? 84 : 100,
-                    36 + result.rows.length * 32 + 16,
+                    HEADER_HEIGHT + result.rows.length * 32 + 16,
                   ),
                 ),
                 flex: "0 0 auto",
@@ -293,7 +295,11 @@ export const ResultsGrid = memo(function ResultsGrid({
             }
           }}
         >
-          <div className="grid-header" role="row" style={{ width, height: 36 }}>
+          <div
+            className="grid-header"
+            role="row"
+            style={{ width, height: HEADER_HEIGHT }}
+          >
             <div className="row-number header-number">#</div>
             {horizontal.getVirtualItems().map((v) => (
               <div
@@ -383,7 +389,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                 aria-rowindex={v.index + 2}
                 style={{
                   position: "absolute",
-                  top: v.start - 36,
+                  top: v.start - HEADER_HEIGHT,
                   height: 32,
                   width,
                 }}
