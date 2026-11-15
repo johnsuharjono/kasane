@@ -724,15 +724,14 @@ export default function App() {
       return;
     }
     try {
-      // Close without the save-on-close path, which would rewrite the file.
+      await (d.kind === "sql"
+        ? api.deleteSQLDocument(d.id)
+        : api.deleteNotebook(d.id));
       if (openTab) {
         if (openTab.sessionId)
           await api.close(openTab.sessionId).catch(() => {});
         close(openTab.id);
       }
-      await (d.kind === "sql"
-        ? api.deleteSQLDocument(d.id)
-        : api.deleteNotebook(d.id));
       await refresh();
       setFlash(`Deleted “${d.title}”.`);
     } catch (e) {

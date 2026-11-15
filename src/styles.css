@@ -2984,12 +2984,7 @@
   .reference-link:hover {
     background: var(--accent);
   }
-  .json-preview {
-    color: var(--muted-foreground);
-  }
-  .grid-cell.selected .json-preview {
-    color: var(--foreground);
-  }
+
   .column-option {
     font: 12px var(--mono);
   }

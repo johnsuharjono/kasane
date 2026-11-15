@@ -36,36 +36,6 @@ const display = (c: Column, v: string) =>
 // Untyped literals coerce to the target column type in INSERT … VALUES.
 const sqlLiteral = (v: string | null) =>
   v === null ? "NULL" : `'${v.replaceAll("'", "''")}'`;
-const isJSON = (c: Column) => c.dataType === "json" || c.dataType === "jsonb";
-/** One-line preview: {city: "Palm Coast", street: "…"} with nested values elided. */
-function compactJSON(v: string) {
-  let value: unknown;
-  try {
-    value = JSON.parse(v);
-  } catch {
-    return v;
-  }
-  const scalar = (x: unknown) =>
-    x !== null && typeof x === "object"
-      ? Array.isArray(x)
-        ? `[${x.length}]`
-        : "{…}"
-      : JSON.stringify(x);
-  if (Array.isArray(value)) return `[${value.map(scalar).join(", ")}]`;
-  if (value !== null && typeof value === "object")
-    return `{${Object.entries(value)
-      .map(([k, x]) => `${k}: ${scalar(x)}`)
-      .join(", ")}}`;
-  return v;
-}
-function pretty(c: Column, v: string) {
-  if (c.dataType !== "json" && c.dataType !== "jsonb") return v;
-  try {
-    return JSON.stringify(JSON.parse(v), null, 2);
-  } catch {
-    return v;
-  }
-}
 const tsv = (v: string | null) =>
   v === null ? "\\N" : /[\t\n\r"]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
 export const ResultsGrid = memo(function ResultsGrid({
@@ -475,10 +445,6 @@ export const ResultsGrid = memo(function ResultsGrid({
                         <span className="value-chip">
                           {display(column, value)}
                         </span>
-                      ) : isJSON(column) ? (
-                        <span className="json-preview">
-                          {compactJSON(value.slice(0, 2000)).slice(0, 160)}
-                        </span>
                       ) : value.length > 160 ? (
                         `${value.slice(0, 160)}…`
                       ) : (
@@ -535,9 +501,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                   {result.columns[end.col]?.dataType}
                 </span>
                 <pre>
-                  {selectedValue === null
-                    ? "NULL"
-                    : pretty(result.columns[end.col], selectedValue ?? "")}
+                  {selectedValue === null ? "NULL" : (selectedValue ?? "")}
                 </pre>
               </section>
               <dl className="inspector-fields">
