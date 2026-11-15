@@ -97,6 +97,40 @@ async fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(),
     )
     .await
 }
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionTest {
+    server_version: String,
+    duration_ms: f64,
+}
+/// Connects with unsaved settings; a missing password falls back to the stored one.
+#[tauri::command]
+async fn test_connection(
+    connection: Connection,
+    password: Option<String>,
+) -> Result<ConnectionTest, DbError> {
+    valid_id(&connection.id)?;
+    let password = match password {
+        Some(p) => p,
+        None => {
+            let id = connection.id.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                security_framework::passwords::get_generic_password("app.kasane.desktop", &id)
+            })
+            .await
+            .map_err(err)?
+            .map_err(|_| err("Enter a password to test this connection."))?;
+            String::from_utf8(bytes).map_err(err)?
+        }
+    };
+    let start = std::time::Instant::now();
+    let session = Session::connect(&connection, &password).await?;
+    let server_version = session.server_version().await?;
+    Ok(ConnectionTest {
+        server_version,
+        duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
+}
 #[tauri::command]
 async fn open_session(
     state: State<'_, AppState>,
@@ -324,6 +358,7 @@ pub fn run() {
             list_connections,
             save_connection,
             delete_connection,
+            test_connection,
             open_session,
             close_session,
             execute_sql,

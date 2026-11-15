@@ -30,6 +30,26 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
       notebooks.set(args.notebook.id, structuredClone(args.notebook));
       return;
     }
+    if (command === "test_connection") {
+      const c = args.connection;
+      if (![55432, 55433].includes(c.port))
+        throw new Error("Only isolated fixtures are allowed");
+      const client = new pg.Client({
+        host: "127.0.0.1",
+        port: c.port,
+        database: c.database,
+        user: c.username,
+        password: args.password ?? "kasane_dev_only",
+      });
+      const start = performance.now();
+      await client.connect();
+      const { rows } = await client.query("SHOW server_version");
+      await client.end();
+      return {
+        serverVersion: rows[0].server_version,
+        durationMs: performance.now() - start,
+      };
+    }
     if (command === "open_session") {
       const c = connections.find((c) => c.id === args.connectionId);
       if (!c) throw new Error("Unknown fixture connection");

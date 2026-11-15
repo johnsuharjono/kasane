@@ -5,9 +5,15 @@ export type Connection = {
   port: number;
   database: string;
   username: string;
+  /** Legacy: true meant verify-full. Kept in sync with tlsMode when saving. */
   tls: boolean;
+  tlsMode?: TlsMode;
   color?: ConnectionColor;
 };
+export type TlsMode = "disable" | "require" | "verify-full";
+export const tlsModeOf = (c: Pick<Connection, "tls" | "tlsMode">): TlsMode =>
+  c.tlsMode ?? (c.tls ? "verify-full" : "disable");
+export type ConnectionTest = { serverVersion: string; durationMs: number };
 export type ConnectionColor =
   "gray" | "blue" | "teal" | "green" | "amber" | "orange" | "rose" | "violet";
 export type Column = {
@@ -43,8 +49,11 @@ export type Relation = {
     type: string;
     required: boolean;
     primaryKeyPosition?: number;
+    /** Single-column foreign key target. */
+    references?: ColumnReference;
   }[];
 };
+export type ColumnReference = { schema: string; table: string; column: string };
 export type Cell = { id: string; kind: "markdown" | "sql"; source: string };
 export type Notebook = {
   version: 1;
@@ -77,6 +86,8 @@ export type TableSettings = {
   filterColumn: string;
   filterOperator: "contains" | "equals" | "is-null";
   filterValue: string;
+  /** Columns left out of the SELECT list. */
+  hiddenColumns?: string[];
 };
 export type Tab = {
   id: string;

@@ -39,7 +39,13 @@ export function tableQuery(
   relation: Relation,
   settings: TableSettings,
 ): string {
-  let query = `SELECT * ${tableSource(relation, settings)}`;
+  const hidden = new Set(settings.hiddenColumns ?? []);
+  const visible = relation.columns.filter((c) => !hidden.has(c.name));
+  const list =
+    hidden.size && visible.length
+      ? visible.map((c) => quoteIdent(c.name)).join(", ")
+      : "*";
+  let query = `SELECT ${list} ${tableSource(relation, settings)}`;
   const primaryKey = relation.columns
     .filter((c) => c.primaryKeyPosition !== undefined)
     .sort((a, b) => a.primaryKeyPosition! - b.primaryKeyPosition!);
