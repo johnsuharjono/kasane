@@ -1,0 +1,36 @@
+name: kasane-dev
+services:
+  postgres:
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: kasane
+      POSTGRES_PASSWORD: kasane_dev_only
+      POSTGRES_DB: kasane_dev
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kasane -d kasane_dev"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+  analytics:
+    profiles: [multi]
+    image: postgres:18.7
+    environment:
+      POSTGRES_USER: kasane
+      POSTGRES_PASSWORD: kasane_dev_only
+      POSTGRES_DB: kasane_analytics
+    ports:
+      - "127.0.0.1:55433:5432"
+    volumes:
+      - analytics-data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kasane -d kasane_analytics"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+volumes:
+  postgres-data:
+  analytics-data:

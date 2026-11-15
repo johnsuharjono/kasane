@@ -1,0 +1,15 @@
+{
+  "identifier": "default",
+  "description": "Main window core operations",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "clipboard-manager:allow-write-text",
+    "core:window:allow-start-dragging",
+    "dialog:allow-open",
+    "dialog:allow-save",
+    "core:window:allow-set-theme"
+  ]
+}

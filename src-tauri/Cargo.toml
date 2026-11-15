@@ -1,0 +1,24 @@
+[package]
+name = "kasane"
+version = "0.1.0"
+description = "A layered PostgreSQL workspace"
+edition = "2021"
+[lib]
+name = "kasane_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+tokio-postgres = "0.7"
+postgres-native-tls = "0.5"
+native-tls = "0.2"
+futures-util = "0.3"
+uuid = { version = "1", features = ["v4", "serde"] }
+security-framework = "3"
+tauri-plugin-clipboard-manager = "2"
+
+tauri-plugin-dialog = "2"

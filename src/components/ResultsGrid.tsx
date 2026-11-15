@@ -1,0 +1,406 @@
+import { native } from "../api";
+import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  useTable,
+  tableFeatures,
+  columnSizingFeature,
+} from "@tanstack/react-table";
+import { useVirtualizer } from "@tanstack/react-virtual";
+import { Check, Copy, X, PanelRightOpen } from "lucide-react";
+import { Button } from "./Button";
+import type { Result, TableSettings } from "../types";
+const features = tableFeatures({ columnSizingFeature });
+type Point = { row: number; col: number };
+const tsv = (v: string | null) =>
+  v === null ? "\\N" : /[\t\n\r"]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
+export const ResultsGrid = memo(function ResultsGrid({
+  result,
+  sort,
+  onSort,
+  compact = false,
+  rowOffset = 0,
+}: {
+  result: Result;
+  compact?: boolean;
+  rowOffset?: number;
+  sort?: TableSettings["sort"];
+  onSort?: (column: string) => void;
+}) {
+  const scroll = useRef<HTMLDivElement>(null);
+  const gridId = useId();
+  const selecting = useRef(false);
+  useEffect(() => {
+    const done = () => {
+      selecting.current = false;
+    };
+    window.addEventListener("pointerup", done);
+    return () => window.removeEventListener("pointerup", done);
+  }, []);
+  const [anchor, setAnchor] = useState<Point>({ row: 0, col: 0 });
+  const [end, setEnd] = useState<Point>({ row: 0, col: 0 });
+  const [inspect, setInspect] = useState(false);
+  const [copyState, setCopyState] = useState("");
+  const drag = useRef<AbortController | null>(null);
+  useEffect(() => () => drag.current?.abort(), []);
+  const columns = useMemo(
+    () =>
+      result.columns.map((c, i) => ({
+        id: String(i),
+        accessorFn: (row: (string | null)[]) => row[i],
+        header: c.name,
+        size: /int|numeric|float/.test(c.dataType) ? 155 : 210,
+        minSize: 80,
+        maxSize: 800,
+      })),
+    [result.columns],
+  );
+  const table = useTable({ features, columns, data: result.rows });
+  const leaf = table.getAllLeafColumns();
+  const sizes = leaf.map((c) => c.getSize());
+  const sizingKey = sizes.join(",");
+  const vertical = useVirtualizer({
+    useAnimationFrameWithResizeObserver: true,
+    count: result.rows.length,
+    getScrollElement: () => scroll.current,
+    estimateSize: () => 32,
+    overscan: 8,
+    scrollMargin: 36,
+  });
+  const horizontal = useVirtualizer({
+    useAnimationFrameWithResizeObserver: true,
+    count: columns.length,
+    getScrollElement: () => scroll.current,
+    estimateSize: (i) => sizes[i],
+    horizontal: true,
+    overscan: 2,
+    paddingStart: 48,
+  });
+  useEffect(() => {
+    horizontal.measure();
+  }, [sizingKey]);
+  const minRow = Math.min(anchor.row, end.row),
+    maxRow = Math.max(anchor.row, end.row),
+    minCol = Math.min(anchor.col, end.col),
+    maxCol = Math.max(anchor.col, end.col);
+  const selectedValue = result.rows[end.row]?.[end.col];
+  async function copy() {
+    const text = result.rows
+      .slice(minRow, maxRow + 1)
+      .map((r) =>
+        r
+          .slice(minCol, maxCol + 1)
+          .map(tsv)
+          .join("\t"),
+      )
+      .join("\n");
+    try {
+      if (native) {
+        const { writeText } =
+          await import("@tauri-apps/plugin-clipboard-manager");
+        await writeText(text);
+      } else {
+        await navigator.clipboard.writeText(text);
+      }
+      setCopyState("Copied");
+    } catch {
+      setCopyState("Clipboard unavailable");
+    }
+  }
+  function move(point: Point, extend = false) {
+    point = {
+      row: Math.max(0, Math.min(result.rows.length - 1, point.row)),
+      col: Math.max(0, Math.min(columns.length - 1, point.col)),
+    };
+    setEnd(point);
+    if (!extend) setAnchor(point);
+    setCopyState("");
+    vertical.scrollToIndex(point.row, { align: "auto" });
+    horizontal.scrollToIndex(point.col, { align: "auto" });
+  }
+  if (!result.columns.length)
+    return (
+      <div className="statement-complete">
+        <Check size={22} />
+        <strong>Statement completed</strong>
+        <span>
+          {result.affectedRows} rows affected · {result.durationMs.toFixed(1)}{" "}
+          ms
+        </span>
+      </div>
+    );
+  const width = horizontal.getTotalSize();
+  return (
+    <div className="results" data-testid="results">
+      <div className="results-toolbar">
+        <span className="eyebrow">RESULTS</span>
+        <span>
+          {result.rows.length.toLocaleString()} displayed
+          {result.truncated
+            ? ` of ${Number(result.returnedRows).toLocaleString()}`
+            : ""}
+        </span>
+        <span className="spacer" />
+        <Button
+          className="quiet"
+          onClick={copy}
+          disabled={!result.rows.length}
+          title="Copy selected cells (⌘C)"
+        >
+          <Copy size={13} />
+          {copyState || "Copy"}
+        </Button>
+        <Button
+          className="icon quiet"
+          aria-label="Inspect selected cell"
+          onClick={() => setInspect(!inspect)}
+        >
+          <PanelRightOpen size={15} />
+        </Button>
+      </div>
+      <div
+        className="grid-and-inspector"
+        style={
+          compact
+            ? {
+                height: Math.min(
+                  360,
+                  Math.max(
+                    result.rows.length ? 84 : 100,
+                    36 + result.rows.length * 32 + 16,
+                  ),
+                ),
+                flex: "0 0 auto",
+              }
+            : undefined
+        }
+      >
+        <div
+          ref={scroll}
+          className="data-grid"
+          role="grid"
+          aria-label="Query results"
+          aria-rowcount={result.rows.length + 1}
+          aria-colcount={columns.length}
+          tabIndex={0}
+          aria-activedescendant={
+            result.rows.length
+              ? `${gridId}-cell-${end.row}-${end.col}`
+              : undefined
+          }
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "c") {
+              e.preventDefault();
+              void copy();
+              return;
+            }
+            if ((e.metaKey || e.ctrlKey) && e.key === "a") {
+              e.preventDefault();
+              setAnchor({ row: 0, col: 0 });
+              setEnd({ row: result.rows.length - 1, col: columns.length - 1 });
+              return;
+            }
+            const next = { ...end };
+            let handled = true;
+            if (e.key === "ArrowDown") next.row++;
+            else if (e.key === "ArrowUp") next.row--;
+            else if (e.key === "ArrowLeft") next.col--;
+            else if (e.key === "ArrowRight") next.col++;
+            else if (e.key === "Tab") {
+              next.col += e.shiftKey ? -1 : 1;
+              if (next.col >= columns.length) {
+                next.col = 0;
+                next.row++;
+              }
+              if (next.col < 0) {
+                next.col = columns.length - 1;
+                next.row--;
+              }
+            } else if (e.key === "Home") {
+              next.col = 0;
+              if (e.metaKey || e.ctrlKey) next.row = 0;
+            } else if (e.key === "End") {
+              next.col = columns.length - 1;
+              if (e.metaKey || e.ctrlKey) next.row = result.rows.length - 1;
+            } else if (e.key === "Enter") {
+              setInspect((v) => !v);
+            } else handled = false;
+            if (handled) {
+              e.preventDefault();
+              if (e.key !== "Enter") move(next, e.shiftKey && e.key !== "Tab");
+            }
+          }}
+        >
+          <div className="grid-header" role="row" style={{ width, height: 36 }}>
+            <div className="row-number header-number">#</div>
+            {horizontal.getVirtualItems().map((v) => (
+              <div
+                key={v.key}
+                className="column-header"
+                role="columnheader"
+                aria-sort={
+                  sort?.column === result.columns[v.index].name
+                    ? sort.direction === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : "none"
+                }
+                style={{ left: v.start, width: v.size }}
+              >
+                {onSort ? (
+                  <button
+                    className="sort-column"
+                    onClick={() => onSort(result.columns[v.index].name)}
+                  >
+                    {result.columns[v.index].name}
+                    <span>
+                      {sort?.column === result.columns[v.index].name
+                        ? sort.direction === "asc"
+                          ? "↑"
+                          : "↓"
+                        : "↕"}
+                    </span>
+                  </button>
+                ) : (
+                  <span>{result.columns[v.index].name}</span>
+                )}
+                <small>{result.columns[v.index].dataType}</small>
+                <div
+                  className="resize-handle"
+                  role="separator"
+                  aria-label={`Resize ${result.columns[v.index].name}`}
+                  aria-orientation="vertical"
+                  onDoubleClick={() => leaf[v.index].resetSize()}
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    drag.current?.abort();
+                    const controller = new AbortController();
+                    drag.current = controller;
+                    const x = e.clientX;
+                    const size = sizes[v.index];
+                    window.addEventListener(
+                      "pointermove",
+                      (event) =>
+                        table.setColumnSizing((old) => ({
+                          ...old,
+                          [String(v.index)]: Math.min(
+                            800,
+                            Math.max(80, size + event.clientX - x),
+                          ),
+                        })),
+                      { signal: controller.signal },
+                    );
+                    window.addEventListener(
+                      "pointerup",
+                      () => controller.abort(),
+                      { once: true, signal: controller.signal },
+                    );
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+          <div
+            className="grid-canvas"
+            style={{ height: vertical.getTotalSize(), width }}
+          >
+            {vertical.getVirtualItems().map((v) => (
+              <div
+                key={v.key}
+                className="grid-row"
+                role="row"
+                aria-rowindex={v.index + 2}
+                style={{
+                  position: "absolute",
+                  top: v.start - 36,
+                  height: 32,
+                  width,
+                }}
+              >
+                <div className="row-number">{v.index + 1 + rowOffset}</div>
+                {horizontal.getVirtualItems().map((c) => {
+                  const value = result.rows[v.index][c.index],
+                    selected =
+                      v.index >= minRow &&
+                      v.index <= maxRow &&
+                      c.index >= minCol &&
+                      c.index <= maxCol;
+                  return (
+                    <div
+                      id={`${gridId}-cell-${v.index}-${c.index}`}
+                      key={c.key}
+                      role="gridcell"
+                      aria-colindex={c.index + 1}
+                      aria-selected={selected}
+                      className={`grid-cell ${selected ? "selected" : ""} ${value === null ? "null-value" : ""} ${/int|numeric|float/.test(result.columns[c.index].dataType) ? "number-value" : ""}`}
+                      style={{ left: c.start, width: c.size }}
+                      onPointerDown={(e) => {
+                        e.preventDefault();
+                        selecting.current = true;
+                        setEnd({ row: v.index, col: c.index });
+                        if (!e.shiftKey)
+                          setAnchor({ row: v.index, col: c.index });
+                        setCopyState("");
+                        scroll.current?.focus();
+                      }}
+                      onPointerEnter={(e) => {
+                        if (selecting.current && e.buttons === 1)
+                          setEnd({ row: v.index, col: c.index });
+                      }}
+                      onDoubleClick={() => setInspect(true)}
+                    >
+                      {value === null ? (
+                        "NULL"
+                      ) : value === "" ? (
+                        <span className="empty-value">empty</span>
+                      ) : value.length > 160 ? (
+                        `${value.slice(0, 160)}…`
+                      ) : (
+                        value
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+          </div>
+          {!result.rows.length && (
+            <div className="empty-result">
+              Query completed. No rows returned.
+            </div>
+          )}
+        </div>
+        {inspect && (
+          <aside className="cell-inspector">
+            <div>
+              <strong>Cell inspector</strong>
+              <Button
+                className="icon quiet"
+                aria-label="Close inspector"
+                onClick={() => setInspect(false)}
+              >
+                <X size={14} />
+              </Button>
+            </div>
+            <span className="eyebrow">
+              {result.columns[end.col]?.name} ·{" "}
+              {result.columns[end.col]?.dataType}
+            </span>
+            <pre>{selectedValue === null ? "NULL" : (selectedValue ?? "")}</pre>
+          </aside>
+        )}
+      </div>
+      <div className="result-status">
+        <span className="status-dot" />
+        <span>{result.durationMs.toFixed(1)} ms</span>
+        <span>·</span>
+        <span>{Number(result.returnedRows).toLocaleString()} returned</span>
+        {result.truncated && (
+          <span className="warning">Limited to 1,000 rows / 8 MiB</span>
+        )}
+        <span className="spacer" />
+        <span>Read-only grid</span>
+      </div>
+    </div>
+  );
+});
