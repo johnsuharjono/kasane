@@ -113,6 +113,8 @@ test("switch database browsers without retargeting saved SQL or notebooks", asyn
       .toBe(true);
     await newDocument("notebook");
     await page.getByLabel("Notebook title").fill("Commerce notes");
+    await page.locator(".notebook-cell .cm-content").click();
+    await page.keyboard.type("SELECT current_database();");
     await page.getByRole("button", { name: "Run cell", exact: true }).click();
     await expect(
       page.getByRole("gridcell").filter({ hasText: "kasane_dev" }),

@@ -26,9 +26,37 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
       sqlDocuments.set(args.document.id, structuredClone(args.document));
       return;
     }
+    if (command === "delete_sql_document") {
+      sqlDocuments.delete(args.id);
+      return;
+    }
+    if (command === "delete_notebook") {
+      notebooks.delete(args.id);
+      return;
+    }
     if (command === "save_notebook") {
       notebooks.set(args.notebook.id, structuredClone(args.notebook));
       return;
+    }
+    if (command === "test_connection") {
+      const c = args.connection;
+      if (![55432, 55433].includes(c.port))
+        throw new Error("Only isolated fixtures are allowed");
+      const client = new pg.Client({
+        host: "127.0.0.1",
+        port: c.port,
+        database: c.database,
+        user: c.username,
+        password: args.password ?? "kasane_dev_only",
+      });
+      const start = performance.now();
+      await client.connect();
+      const { rows } = await client.query("SHOW server_version");
+      await client.end();
+      return {
+        serverVersion: rows[0].server_version,
+        durationMs: performance.now() - start,
+      };
     }
     if (command === "open_session") {
       const c = connections.find((c) => c.id === args.connectionId);
@@ -47,14 +75,17 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
         types,
       });
       await client.connect();
-      const names = new Map(
-        (await client.query("SELECT oid::text,typname FROM pg_type")).rows.map(
-          (r) => [Number(r.oid), r.typname],
-        ),
+      const typeRows = (
+        await client.query("SELECT oid::text,typname,typtype FROM pg_type")
+      ).rows;
+      const names = new Map(typeRows.map((r) => [Number(r.oid), r.typname]));
+      const enums = new Set(
+        typeRows.filter((r) => r.typtype === "e").map((r) => Number(r.oid)),
       );
       sessions.set(args.sessionId, {
         client,
         names,
+        enums,
         connectionId: c.id,
         database: c.database,
       });
@@ -109,6 +140,7 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
           name: f.name,
           dataType: s.names.get(f.dataTypeID),
           oid: f.dataTypeID,
+          isEnum: s.enums.has(f.dataTypeID),
         })),
         rows,
         durationMs: performance.now() - start,

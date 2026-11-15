@@ -22,9 +22,17 @@ The user can cancel the active request via its request ID and PostgreSQL cancell
 
 ## Connection workspaces
 
-A compact sidebar switcher chooses one connection workspace. Selection automatically opens a dedicated explorer session and loads its catalog; switching closes that explorer session. An effect owns the asynchronous open/catalog lifecycle and disposes late responses, so an earlier selection cannot replace the current catalog. Explicit disconnect also closes that workspace's document sessions and marks results outdated. A failed connection offers explicit retry rather than looping.
+A compact sidebar switcher chooses one connection workspace. Each connection may carry a color from a fixed eight-swatch palette (`color` in connections.json, validated in Rust); it tints the switcher mark and has no semantic meaning. Selection automatically opens a dedicated explorer session and loads its catalog; switching closes that explorer session. An effect owns the asynchronous open/catalog lifecycle and disposes late responses, so an earlier selection cannot replace the current catalog. Explicit disconnect also closes that workspace's document sessions and marks results outdated. A failed connection offers explicit retry rather than looping.
 
 Tabs, saved-document libraries, active-tab selection, table filters, and explorer search/collapse state are scoped to the connection. Switching leaves independent document sessions and results live, including running queries. Documents inherit the workspace connection and are never silently retargeted. Restart restoration retains sources and layout, removes all execution/session state, and marks restored table tabs passive until Refresh. Schema metadata loading never replays user SQL.
+
+## Catalog extras
+
+The catalog query also returns `pg_class.reltuples` as an approximate row count for the sidebar; it is absent for views and never-analyzed tables, and no `COUNT(*)` runs. Single-column foreign keys come back as `fk_schema`/`fk_table`/`fk_column`; result headers show the target, and the row inspector's **Open …** link opens the referenced table filtered with `equals` on that key. Composite keys are not linked. Result columns carry `isEnum` from the driver's type kind so enum and boolean values render as neutral chips without an extra catalog query.
+
+## Connection TLS and testing
+
+`tlsMode` is `disable`, `require` (encrypted, certificate and host name not checked) or `verify-full`. Older connection files only have `tls`; `true` maps to `verify-full`, and saves keep `tls` set whenever encryption is on. **Test connection** opens a throwaway session with the unsaved settings, runs `SHOW server_version`, and closes it; without a typed password it uses the stored Keychain item.
 
 ## Value boundary and execution
 

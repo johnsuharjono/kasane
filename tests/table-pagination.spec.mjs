@@ -110,6 +110,8 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await page
       .getByRole("button", { name: "New notebook", exact: true })
       .click();
+    await page.locator(".notebook-cell .cm-content").click();
+    await page.keyboard.type("SELECT current_database();");
     await page.getByRole("button", { name: "Run cell", exact: true }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("kasane_dev");
     await expect(page.locator(".cm-editor")).toHaveCSS("font-size", "16px");

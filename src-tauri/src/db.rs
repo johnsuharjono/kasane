@@ -3,7 +3,7 @@ use postgres_native_tls::MakeTlsConnector;
 use serde::{Deserialize, Serialize};
 use std::{sync::Arc, time::Instant};
 use tokio::sync::Mutex;
-use tokio_postgres::{CancelToken, Client, SimpleQueryMessage};
+use tokio_postgres::{types::Kind, CancelToken, Client, SimpleQueryMessage};
 
 #[derive(Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -14,8 +14,34 @@ pub struct Connection {
     pub port: u16,
     pub database: String,
     pub username: String,
+    /// Legacy flag: true meant "require TLS and verify the certificate".
     pub tls: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tls_mode: Option<TlsMode>,
+    /// Name from the frontend's fixed swatch palette; absent means neutral.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
 }
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TlsMode {
+    Disable,
+    /// Encrypt, but accept any certificate and host name.
+    Require,
+    VerifyFull,
+}
+impl Connection {
+    pub fn tls_mode(&self) -> TlsMode {
+        self.tls_mode.unwrap_or(if self.tls {
+            TlsMode::VerifyFull
+        } else {
+            TlsMode::Disable
+        })
+    }
+}
+pub const CONNECTION_COLORS: [&str; 8] = [
+    "gray", "blue", "teal", "green", "amber", "orange", "rose", "violet",
+];
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DbError {
@@ -71,13 +97,21 @@ impl Session {
             .password(password)
             .application_name("Kasane")
             .connect_timeout(std::time::Duration::from_secs(10))
-            .ssl_mode(if c.tls {
-                tokio_postgres::config::SslMode::Require
-            } else {
+            .ssl_mode(if c.tls_mode() == TlsMode::Disable {
                 tokio_postgres::config::SslMode::Disable
+            } else {
+                tokio_postgres::config::SslMode::Require
             });
+        let mut builder = native_tls::TlsConnector::builder();
+        if c.tls_mode() == TlsMode::Require {
+            builder
+                .danger_accept_invalid_certs(true)
+                .danger_accept_invalid_hostnames(true);
+        }
         let tls = MakeTlsConnector::new(
-            native_tls::TlsConnector::new().map_err(|e| DbError::message(e.to_string()))?,
+            builder
+                .build()
+                .map_err(|e| DbError::message(e.to_string()))?,
         );
         let (client, connection) = config.connect(tls.clone()).await?;
         tokio::spawn(async move {
@@ -91,6 +125,18 @@ impl Session {
             active: Mutex::new(None),
             tls,
         }))
+    }
+    /// Server version string, for the connection dialog's test result.
+    pub async fn server_version(&self) -> Result<String, DbError> {
+        let client = self.client.lock().await;
+        let rows = client.simple_query("SHOW server_version").await?;
+        Ok(rows
+            .iter()
+            .find_map(|m| match m {
+                SimpleQueryMessage::Row(r) => r.get(0).map(str::to_owned),
+                _ => None,
+            })
+            .unwrap_or_default())
     }
     pub async fn execute(&self, request_id: &str, sql: &str) -> Result<QueryResult, DbError> {
         self.execute_with_limits(request_id, sql, 1000, 8 * 1024 * 1024)
@@ -137,6 +183,7 @@ impl Session {
                 name: c.name().to_owned(),
                 data_type: c.type_().name().to_owned(),
                 oid: c.type_().oid(),
+                is_enum: matches!(c.type_().kind(), Kind::Enum(_)),
             })
             .collect();
         // PostgreSQL's text protocol preserves numeric precision, timestamp microseconds, bytea, arrays and unknown types.
@@ -191,6 +238,7 @@ pub struct Column {
     pub name: String,
     pub data_type: String,
     pub oid: u32,
+    pub is_enum: bool,
 }
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -204,11 +252,28 @@ pub struct QueryResult {
     pub bytes: usize,
 }
 
-pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
+pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position, CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint::text END AS estimated_rows, fk.sch AS fk_schema, fk.rel AS fk_table, fk.col AS fk_column FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped LEFT JOIN LATERAL (SELECT tn.nspname AS sch, t.relname AS rel, ta.attname AS col FROM pg_catalog.pg_constraint con JOIN pg_catalog.pg_class t ON t.oid=con.confrelid JOIN pg_catalog.pg_namespace tn ON tn.oid=t.relnamespace JOIN pg_catalog.pg_attribute ta ON ta.attrelid=t.oid AND ta.attnum=con.confkey[1] WHERE con.conrelid=c.oid AND con.contype='f' AND cardinality(con.conkey)=1 AND con.conkey[1]=a.attnum ORDER BY con.conname LIMIT 1) fk ON true WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn legacy_tls_flag_maps_to_mode() {
+        let parse = |json: &str| serde_json::from_str::<Connection>(json).unwrap();
+        let base = r#""id":"x","name":"n","host":"h","port":5432,"database":"d","username":"u""#;
+        assert_eq!(
+            parse(&format!("{{{base},\"tls\":false}}")).tls_mode(),
+            TlsMode::Disable
+        );
+        assert_eq!(
+            parse(&format!("{{{base},\"tls\":true}}")).tls_mode(),
+            TlsMode::VerifyFull
+        );
+        assert_eq!(
+            parse(&format!("{{{base},\"tls\":true,\"tlsMode\":\"require\"}}")).tls_mode(),
+            TlsMode::Require
+        );
+    }
     #[tokio::test]
     #[ignore = "requires make db-up db-seed"]
     async fn postgres_vertical_slice() {
@@ -220,6 +285,8 @@ mod tests {
             database: "kasane_dev".into(),
             username: "kasane".into(),
             tls: false,
+            tls_mode: None,
+            color: None,
         };
         let s = Session::connect(&c, "kasane_dev_only").await.unwrap();
         let catalog = s.catalog().await.unwrap();

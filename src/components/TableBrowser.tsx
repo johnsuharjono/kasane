@@ -1,7 +1,16 @@
 import { SelectField } from "./SelectField";
 import { Input } from "./ui/input";
-import { useEffect, useState } from "react";
-import { ChevronLeft, ChevronRight, ChevronsLeft, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { useDelayed } from "../use-delayed";
+import {
+  ChevronLeft,
+  ChevronRight,
+  ChevronsLeft,
+  Columns3,
+  Filter,
+  Lock,
+  X,
+} from "lucide-react";
 import { Button } from "./Button";
 import { ExecutionView } from "./ExecutionView";
 import {
@@ -11,33 +20,61 @@ import {
   tableCountQuery,
 } from "../table-query";
 import { usePreferences } from "../preferences";
-import type { Tab, TableSettings } from "../types";
+import type { ColumnReference, Tab, TableSettings } from "../types";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 export function TableBrowser({
   tab,
   onExecute,
   onCount,
+  onOpenReference,
 }: {
   tab: Tab;
   onExecute: (settings: TableSettings) => void;
   onCount: () => void;
+  onOpenReference: (reference: ColumnReference, value: string) => void;
 }) {
   const settings = tab.tableSettings ?? defaultTableSettings;
   const [draft, setDraft] = useState(settings);
+  // Filters can change from outside (following a foreign key); mirror them.
+  useEffect(() => {
+    setDraft(settings);
+  }, [settings.filterColumn, settings.filterOperator, settings.filterValue]);
   const execution = tab.executions["table-data"];
   const { autoPreview } = usePreferences();
   const running = Object.values(tab.executions).some(
     (e) => e.state === "running",
   );
+  // Controls dim only for slow work; App's busy guard drops clicks meanwhile.
+  const busy = useDelayed(running);
   const page = pageFor(settings),
     pageSize = TABLE_PAGE_SIZE;
   const count = tab.executions["table-count"];
   const validCount =
     count?.source === tableCountQuery(tab.relation!, settings) &&
     !count.outdated;
+  // Keep showing the previous count for this filter while a recount runs.
+  const lastCount = useRef<{ source: string; total: string }>(undefined);
+  if (validCount && count.state === "success" && count.result?.rows[0]?.[0])
+    lastCount.current = {
+      source: count.source,
+      total: count.result.rows[0][0],
+    };
   const total =
     validCount && count.state === "success"
       ? count.result?.rows[0]?.[0]
-      : undefined;
+      : validCount &&
+          count.state === "running" &&
+          lastCount.current?.source === count.source
+        ? lastCount.current.total
+        : undefined;
+  const counting = useDelayed(count?.state === "running");
   const totalPages = total
     ? (BigInt(total) + BigInt(pageSize) - 1n) / BigInt(pageSize)
     : undefined;
@@ -61,80 +98,184 @@ export function TableBrowser({
     };
     onExecute(next);
   }
+  const operatorLabel = {
+    contains: "contains",
+    equals: "equals",
+    "is-null": "is null",
+  }[settings.filterOperator];
+  const hidden = settings.hiddenColumns ?? [];
+  function setHidden(hiddenColumns: string[]) {
+    onExecute({ ...settings, hiddenColumns });
+  }
+  function clearFilter() {
+    const next = {
+      ...defaultTableSettings,
+      sort: settings.sort,
+      hiddenColumns: settings.hiddenColumns,
+    };
+    setDraft(next);
+    onExecute(next);
+  }
   return (
     <div className="table-browser">
-      {tab.filtersOpen && (
-        <form
-          className="table-filters"
-          onSubmit={(e) => {
-            e.preventDefault();
-            onExecute({ ...draft, page: 0, sort: settings.sort });
-          }}
-        >
-          <span>Filter</span>
-          <SelectField
-            label="Filter column"
-            disabled={running}
-            value={draft.filterColumn}
-            onChange={(filterColumn) => setDraft({ ...draft, filterColumn })}
-            options={[
-              { value: "", label: "Choose column" },
-              ...tab.relation!.columns.map((c) => ({
-                value: c.name,
-                label: c.name,
-              })),
-            ]}
-          />
-          <SelectField
-            label="Filter operator"
-            disabled={running}
-            value={draft.filterOperator}
-            onChange={(filterOperator) =>
-              setDraft({
+      <div className="table-toolbar">
+        {tab.filtersOpen ? (
+          <form
+            className="table-filters"
+            onSubmit={(e) => {
+              e.preventDefault();
+              onExecute({
                 ...draft,
-                filterOperator:
-                  filterOperator as TableSettings["filterOperator"],
-              })
-            }
-            options={[
-              { value: "contains", label: "contains" },
-              { value: "equals", label: "equals" },
-              { value: "is-null", label: "is null" },
-            ]}
-          />
-          {draft.filterOperator !== "is-null" && (
-            <Input
-              aria-label="Filter value"
-              placeholder="Value"
-              disabled={running}
-              value={draft.filterValue}
-              onChange={(e) =>
-                setDraft({ ...draft, filterValue: e.target.value })
-              }
+                page: 0,
+                sort: settings.sort,
+                hiddenColumns: settings.hiddenColumns,
+              });
+            }}
+          >
+            <Filter size={14} aria-hidden="true" />
+            <SelectField
+              label="Filter column"
+              disabled={busy}
+              aria-disabled={running}
+              value={draft.filterColumn}
+              onChange={(filterColumn) => setDraft({ ...draft, filterColumn })}
+              options={[
+                { value: "", label: "Choose column" },
+                ...tab.relation!.columns.map((c) => ({
+                  value: c.name,
+                  label: c.name,
+                })),
+              ]}
             />
-          )}
-          <Button type="submit" disabled={running || !draft.filterColumn}>
-            Apply
-          </Button>
-          {settings.filterColumn && (
-            <Button
-              className="quiet icon"
-              aria-label="Clear filter"
-              disabled={running}
-              onClick={() => {
-                const next = {
-                  ...defaultTableSettings,
-                  sort: settings.sort,
-                };
-                setDraft(next);
-                onExecute(next);
-              }}
-            >
-              <X size={13} />
+            <SelectField
+              label="Filter operator"
+              disabled={busy}
+              aria-disabled={running}
+              value={draft.filterOperator}
+              onChange={(filterOperator) =>
+                setDraft({
+                  ...draft,
+                  filterOperator:
+                    filterOperator as TableSettings["filterOperator"],
+                })
+              }
+              options={[
+                { value: "contains", label: "contains" },
+                { value: "equals", label: "equals" },
+                { value: "is-null", label: "is null" },
+              ]}
+            />
+            {draft.filterOperator !== "is-null" && (
+              <Input
+                aria-label="Filter value"
+                placeholder="Value"
+                disabled={busy}
+                aria-disabled={running}
+                value={draft.filterValue}
+                onChange={(e) =>
+                  setDraft({ ...draft, filterValue: e.target.value })
+                }
+              />
+            )}
+            <Button type="submit" disabled={busy || !draft.filterColumn}>
+              Apply
             </Button>
-          )}
-        </form>
-      )}
+            {settings.filterColumn && (
+              <Button
+                className="quiet icon"
+                aria-label="Clear filter"
+                disabled={busy}
+                aria-disabled={running}
+                onClick={clearFilter}
+              >
+                <X size={13} />
+              </Button>
+            )}
+          </form>
+        ) : (
+          <span className="filter-summary">
+            {settings.filterColumn ? (
+              <>
+                <Filter size={13} aria-hidden="true" />
+                <code>{settings.filterColumn}</code> {operatorLabel}
+                {settings.filterOperator !== "is-null" && (
+                  <code>{settings.filterValue}</code>
+                )}
+              </>
+            ) : (
+              "All rows"
+            )}
+            {settings.sort && (
+              <>
+                <span aria-hidden="true">·</span>
+                sorted by <code>{settings.sort.column}</code>{" "}
+                {settings.sort.direction === "asc" ? "↑" : "↓"}
+              </>
+            )}
+          </span>
+        )}
+        <span className="spacer" />
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <Button className="quiet small" aria-label="Choose columns" />
+            }
+          >
+            <Columns3 size={13} aria-hidden="true" />
+            Columns {tab.relation!.columns.length - hidden.length}/
+            {tab.relation!.columns.length}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="max-h-80 min-w-52">
+            {tab.relation!.columns.map((c) => (
+              <DropdownMenuCheckboxItem
+                key={c.name}
+                closeOnClick={false}
+                checked={!hidden.includes(c.name)}
+                disabled={
+                  !hidden.includes(c.name) &&
+                  hidden.length === tab.relation!.columns.length - 1
+                }
+                onCheckedChange={(checked) =>
+                  setHidden(
+                    checked
+                      ? hidden.filter((h) => h !== c.name)
+                      : [...hidden, c.name],
+                  )
+                }
+              >
+                <span className="column-option">{c.name}</span>
+              </DropdownMenuCheckboxItem>
+            ))}
+            {hidden.length > 0 && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => setHidden([])}>
+                  Show all columns
+                </DropdownMenuItem>
+              </>
+            )}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        <span className="row-count" aria-live="polite">
+          {total != null ? (
+            <>
+              <strong>{BigInt(total).toLocaleString()}</strong>{" "}
+              {settings.filterColumn ? "rows match" : "rows"}
+            </>
+          ) : counting ? (
+            "Counting…"
+          ) : null}
+        </span>
+        <Button
+          className="quiet small"
+          onClick={onCount}
+          disabled={busy || tab.disconnected}
+          aria-disabled={running || tab.disconnected}
+          title="Count rows matching the current filter. This can scan a large table."
+        >
+          {counting ? "Counting…" : total != null ? "Recount" : "Count rows"}
+        </Button>
+      </div>
       {!execution && (tab.restored || !autoPreview) ? (
         <div className="execution-empty">
           <span>{tab.restored ? "Table restored." : "Table ready."}</span>
@@ -143,9 +284,11 @@ export function TableBrowser({
       ) : (
         <ExecutionView
           execution={execution}
+          relation={tab.relation}
+          onOpenReference={onOpenReference}
           rowOffset={page * pageSize}
           sort={settings.sort}
-          onSort={running ? undefined : sort}
+          onSort={sort}
         />
       )}
       {validCount && count?.state === "failed" && (
@@ -154,6 +297,11 @@ export function TableBrowser({
         </div>
       )}
       <div className="table-pagination" aria-label="Table pagination">
+        <span className="read-only">
+          <Lock size={12} aria-hidden="true" />
+          Read-only
+        </span>
+        <span className="spacer" />
         <span className="page-range" aria-live="polite">
           {fetched
             ? `${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + fetched).toLocaleString()}`
@@ -163,22 +311,10 @@ export function TableBrowser({
             ` of ${BigInt(total).toLocaleString()} rows`}
         </span>
         <Button
-          className="quiet small"
-          onClick={onCount}
-          disabled={running || tab.disconnected}
-          title="Count rows matching the current filter. This can scan a large table."
-        >
-          {count?.state === "running"
-            ? "Counting…"
-            : total != null
-              ? "Recount"
-              : "Count rows"}
-        </Button>
-        <span className="spacer" />
-        <Button
           className="quiet icon"
           aria-label="First page"
-          disabled={running || tab.disconnected || page === 0}
+          disabled={busy || tab.disconnected || page === 0}
+          aria-disabled={running || tab.disconnected || page === 0}
           onClick={() => onExecute({ ...settings, page: 0 })}
         >
           <ChevronsLeft size={14} />
@@ -186,7 +322,8 @@ export function TableBrowser({
         <Button
           className="quiet icon"
           aria-label="Previous page"
-          disabled={running || tab.disconnected || page === 0}
+          disabled={busy || tab.disconnected || page === 0}
+          aria-disabled={running || tab.disconnected || page === 0}
           onClick={() => onExecute({ ...settings, page: page - 1 })}
         >
           <ChevronLeft size={14} />
@@ -201,6 +338,12 @@ export function TableBrowser({
           className="quiet icon"
           aria-label="Next page"
           disabled={
+            busy ||
+            tab.disconnected ||
+            !execution?.hasNextPage ||
+            execution?.outdated
+          }
+          aria-disabled={
             running ||
             tab.disconnected ||
             !execution?.hasNextPage ||

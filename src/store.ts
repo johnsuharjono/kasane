@@ -98,7 +98,7 @@ export const useWorkspace = create<Workspace>()(
                       {
                         id: uid(),
                         kind: "sql",
-                        source: source ?? "SELECT current_database();",
+                        source: source ?? "",
                       },
                     ],
             },

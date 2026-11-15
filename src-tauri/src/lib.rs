@@ -1,7 +1,7 @@
 mod db;
 mod menu;
 mod sql_documents;
-use db::{Connection, DbError, QueryResult, Session};
+use db::{Connection, DbError, QueryResult, Session, CONNECTION_COLORS};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tauri::{Manager, State};
@@ -49,6 +49,11 @@ async fn save_connection(
     password: Option<String>,
 ) -> Result<(), DbError> {
     valid_id(&connection.id)?;
+    if let Some(color) = &connection.color {
+        if !CONNECTION_COLORS.contains(&color.as_str()) {
+            return Err(err("Unknown connection color"));
+        }
+    }
     let _guard = state.files.lock().await;
     if let Some(password) = password {
         let id = connection.id.clone();
@@ -91,6 +96,40 @@ async fn delete_connection(state: State<'_, AppState>, id: String) -> Result<(),
         &serde_json::to_vec_pretty(&list).map_err(err)?,
     )
     .await
+}
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ConnectionTest {
+    server_version: String,
+    duration_ms: f64,
+}
+/// Connects with unsaved settings; a missing password falls back to the stored one.
+#[tauri::command]
+async fn test_connection(
+    connection: Connection,
+    password: Option<String>,
+) -> Result<ConnectionTest, DbError> {
+    valid_id(&connection.id)?;
+    let password = match password {
+        Some(p) => p,
+        None => {
+            let id = connection.id.clone();
+            let bytes = tauri::async_runtime::spawn_blocking(move || {
+                security_framework::passwords::get_generic_password("app.kasane.desktop", &id)
+            })
+            .await
+            .map_err(err)?
+            .map_err(|_| err("Enter a password to test this connection."))?;
+            String::from_utf8(bytes).map_err(err)?
+        }
+    };
+    let start = std::time::Instant::now();
+    let session = Session::connect(&connection, &password).await?;
+    let server_version = session.server_version().await?;
+    Ok(ConnectionTest {
+        server_version,
+        duration_ms: start.elapsed().as_secs_f64() * 1000.0,
+    })
 }
 #[tauri::command]
 async fn open_session(
@@ -211,6 +250,37 @@ async fn save_notebook(state: State<'_, AppState>, notebook: Notebook) -> Result
     )
     .await
 }
+/// Removes a saved document's file; a missing file counts as already deleted.
+async fn remove_document(path: PathBuf) -> Result<(), DbError> {
+    match tokio::fs::remove_file(path).await {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(err(e)),
+        _ => Ok(()),
+    }
+}
+#[tauri::command]
+async fn delete_notebook(state: State<'_, AppState>, id: String) -> Result<(), DbError> {
+    valid_id(&id)?;
+    let _guard = state.files.lock().await;
+    remove_document(
+        state
+            .root
+            .join("notebooks")
+            .join(format!("{id}.kasane.json")),
+    )
+    .await
+}
+#[tauri::command]
+async fn delete_sql_document(state: State<'_, AppState>, id: String) -> Result<(), DbError> {
+    valid_id(&id)?;
+    let _guard = state.files.lock().await;
+    remove_document(
+        state
+            .root
+            .join("sql-documents")
+            .join(format!("{id}.sql.json")),
+    )
+    .await
+}
 #[tauri::command]
 async fn list_notebooks(state: State<'_, AppState>) -> Result<Vec<Notebook>, DbError> {
     let mut entries = tokio::fs::read_dir(state.root.join("notebooks"))
@@ -314,11 +384,14 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             list_sql_documents,
             save_sql_document,
+            delete_sql_document,
+            delete_notebook,
             read_sql_file,
             write_sql_file,
             list_connections,
             save_connection,
             delete_connection,
+            test_connection,
             open_session,
             close_session,
             execute_sql,

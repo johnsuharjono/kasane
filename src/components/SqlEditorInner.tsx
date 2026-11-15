@@ -6,7 +6,7 @@ import { useMemo } from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { PostgreSQL, sql } from "@codemirror/lang-sql";
 import { Prec } from "@codemirror/state";
-import { keymap, EditorView } from "@codemirror/view";
+import { keymap, EditorView, placeholder } from "@codemirror/view";
 import type { Relation } from "../types";
 export function SqlEditor({
   value,
@@ -78,6 +78,7 @@ export function SqlEditor({
         defaultSchema: "public",
         upperCaseKeywords: true,
       }),
+      placeholder("Write SQL…  ⌘↵ to run"),
       Prec.highest(
         keymap.of([
           {
@@ -104,8 +105,13 @@ export function SqlEditor({
           border: "none",
           color: "var(--muted-foreground)",
         },
-        ".cm-activeLine": { backgroundColor: "var(--muted)" },
+        ".cm-activeLine": { backgroundColor: "transparent" },
+        "&.cm-focused .cm-activeLine": {
+          backgroundColor:
+            "color-mix(in srgb, var(--foreground) 5%, transparent)",
+        },
         ".cm-activeLineGutter": { backgroundColor: "transparent" },
+        ".cm-placeholder": { color: "var(--muted-foreground)" },
         "&.cm-focused": { outline: "none" },
         ".cm-scroller": { overflow: "auto" },
         ".cm-selectionBackground": {

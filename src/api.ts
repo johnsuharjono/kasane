@@ -1,6 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   Connection,
+  ConnectionTest,
   Notebook,
   Result,
   Relation,
@@ -21,6 +22,8 @@ export const api = {
   sqlDocuments: () => call<SQLDocument[]>("list_sql_documents"),
   saveSQLDocument: (document: SQLDocument) =>
     call<void>("save_sql_document", { document }),
+  deleteSQLDocument: (id: string) => call<void>("delete_sql_document", { id }),
+  deleteNotebook: (id: string) => call<void>("delete_notebook", { id }),
   readSQL: (path: string) => call<string>("read_sql_file", { path }),
   writeSQL: (path: string, source: string) =>
     call<void>("write_sql_file", { path, source }),
@@ -28,6 +31,11 @@ export const api = {
   saveConnection: (connection: Connection, password?: string) =>
     call<void>("save_connection", { connection, password: password ?? null }),
   deleteConnection: (id: string) => call<void>("delete_connection", { id }),
+  testConnection: (connection: Connection, password?: string) =>
+    call<ConnectionTest>("test_connection", {
+      connection,
+      password: password || null,
+    }),
   open: (connectionId: string, sessionId: string) =>
     call<void>("open_session", { connectionId, sessionId }),
   close: (sessionId: string) => call<void>("close_session", { sessionId }),
@@ -53,6 +61,10 @@ export const api = {
       type,
       required,
       primaryKeyPosition,
+      estimatedRows,
+      fkSchema,
+      fkTable,
+      fkColumn,
     ] of result.rows) {
       const key = JSON.stringify([schema, name]);
       if (!map.has(key))
@@ -60,6 +72,7 @@ export const api = {
           schema: schema!,
           name: name!,
           kind: kind!,
+          estimatedRows: estimatedRows ? Number(estimatedRows) : undefined,
           columns: [],
         });
       map.get(key)!.columns.push({
@@ -69,6 +82,10 @@ export const api = {
         primaryKeyPosition: primaryKeyPosition
           ? Number(primaryKeyPosition)
           : undefined,
+        references:
+          fkSchema && fkTable && fkColumn
+            ? { schema: fkSchema, table: fkTable, column: fkColumn }
+            : undefined,
       });
     }
     return [...map.values()];

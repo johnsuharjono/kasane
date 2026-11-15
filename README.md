@@ -5,11 +5,12 @@
 A macOS PostgreSQL client with SQL documents and notebooks.
 
 - Browse schemas, tables, views, and columns.
-- Filter, sort, and page through table data.
+- Filter, sort, page through and hide columns of table data, and follow foreign keys to related rows.
 - Write SQL with schema-aware completion and run it with ⌘Enter.
 - Combine Markdown and SQL in notebooks with a shared session.
-- Keep separate workspaces for saved connections, with passwords in macOS Keychain.
-- Inspect and copy results, cancel queries, and switch between light and dark themes.
+- Keep separate workspaces for saved connections, each with its own color and TLS mode, with passwords in macOS Keychain; test a connection before saving it.
+- Jump to any table, column, document or command with ⌘K.
+- Inspect whole rows, copy results as TSV, JSON or INSERT, cancel queries, and switch between light and dark themes.
 
 Kasane is in development. Table data is read-only; SQL statements can modify your database. Each execution accepts one statement, with results capped at 1,000 rows or 8 MiB. Queries are never automatically retried.
 
