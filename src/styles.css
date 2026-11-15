@@ -1691,7 +1691,7 @@
     height: auto;
     min-height: 0;
     display: flex;
-    align-items: flex-end;
+    align-items: center;
     gap: 2px;
     padding: 0 0 0 6px;
     background: transparent;
@@ -1703,14 +1703,12 @@
     display: none;
   }
   .tab {
-    height: 35px;
+    height: 30px;
     max-width: 210px;
-    padding: 0 4px 0 11px;
+    padding: 0 3px 0 10px;
     gap: 2px;
     border: 1px solid transparent;
-    border-bottom: 0;
-    border-radius: 8px 8px 0 0;
-    border-top-width: 1px;
+    border-radius: 7px;
   }
   .tab:hover {
     background: color-mix(in srgb, var(--foreground) 4%, transparent);
@@ -1718,9 +1716,9 @@
   .tab.active {
     background: var(--background);
     border-color: var(--border);
-    margin-bottom: -1px;
+    margin-bottom: 0;
     padding-bottom: 0;
-    height: 36px;
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 6%, transparent);
   }
   .tab > button:first-child {
     gap: 7px;
