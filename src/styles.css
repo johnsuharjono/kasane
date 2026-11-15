@@ -1666,10 +1666,8 @@
     min-width: 0;
   }
   .tab {
-    flex: 0 1 auto;
-    min-width: 84px;
     height: 30px;
-    max-width: 200px;
+    max-width: 210px;
     padding: 0 3px 0 10px;
     gap: 2px;
     border: 1px solid transparent;
@@ -1942,8 +1940,8 @@
     background: var(--sidebar-accent);
   }
   .notebook-list button.active {
-    background: var(--background);
-    box-shadow: 0 0 0 1px var(--border);
+    background: var(--accent);
+    color: var(--accent-foreground);
     font-weight: 500;
   }
   .notebook-list button.active > svg {

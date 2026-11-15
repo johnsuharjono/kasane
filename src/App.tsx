@@ -1008,7 +1008,7 @@ export default function App() {
                 <div className="sidebar-search">
                   <Search size={13} aria-hidden="true" />
                   <Input
-                    className="h-auto border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+                    className="h-auto border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 dark:bg-transparent"
                     placeholder="Filter tables & documents"
                     aria-label="Filter tables"
                     value={search}
