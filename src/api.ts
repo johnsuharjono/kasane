@@ -28,6 +28,8 @@ export const api = {
   readSQL: (path: string) => call<string>("read_sql_file", { path }),
   writeSQL: (path: string, source: string) =>
     call<void>("write_sql_file", { path, source }),
+  writeCSV: (path: string, source: string) =>
+    call<void>("write_csv_file", { path, source }),
   connections: () => call<Connection[]>("list_connections"),
   saveConnection: (connection: Connection, password?: string) =>
     call<void>("save_connection", { connection, password: password ?? null }),

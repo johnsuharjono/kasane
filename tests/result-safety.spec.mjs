@@ -89,3 +89,53 @@ test("failed document deletion preserves the open draft", async ({ page }) => {
     await bridge.close();
   }
 });
+
+test("CSV export writes the displayed rows with PostgreSQL CSV escaping", async ({
+  page,
+}) => {
+  const bridge = await setup(
+    page,
+    `SELECT i AS "row,id", '重ね,"quoted"' || chr(10) || 'next line' AS payload,
+            NULL::text AS missing, ''::text AS empty
+     FROM generate_series(1, 1002) AS i;`,
+  );
+  try {
+    await page.evaluate(() => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        if (command === "plugin:dialog|save") {
+          window.csvDialog = args.options;
+          return "/tmp/results.csv";
+        }
+        if (command === "write_csv_file") {
+          window.csvExport = args;
+          return;
+        }
+        return invoke(command, args);
+      };
+    });
+    await page.locator(".cm-content").press("Meta+Enter");
+    await expect(page.locator(".result-status")).toContainText(
+      "1,000 of 1,002 returned",
+    );
+    await page.getByRole("button", { name: "Export CSV", exact: true }).click();
+    await expect
+      .poll(() => page.evaluate(() => window.csvExport?.path))
+      .toBe("/tmp/results.csv");
+    const { title, source } = await page.evaluate(() => ({
+      title: window.csvDialog.title,
+      source: window.csvExport.source,
+    }));
+    expect(title).toBe("Export 1,000 displayed rows (limited result)");
+    expect(
+      source.startsWith(
+        '"row,id",payload,missing,empty\r\n1,"重ね,""quoted""\nnext line",,""\r\n',
+      ),
+    ).toBe(true);
+    expect(source.split("\r\n")).toHaveLength(1002);
+    expect(source).toContain('\r\n1000,"重ね,');
+    expect(source).not.toContain("\r\n1001,");
+  } finally {
+    await bridge.close();
+  }
+});

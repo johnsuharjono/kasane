@@ -1,4 +1,5 @@
-import { native } from "../api";
+import { api, native, quoteIdent } from "../api";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   useTable,
@@ -12,6 +13,7 @@ import {
   ArrowUpRight,
   Check,
   Copy,
+  Download,
   KeyRound,
   PanelRightOpen,
   X,
@@ -24,7 +26,7 @@ import type {
   Result,
   TableSettings,
 } from "../types";
-import { quoteIdent } from "../api";
+import { asError } from "../types";
 const features = tableFeatures({ columnSizingFeature });
 // Two-line header: column name above its type.
 const HEADER_HEIGHT = 46;
@@ -38,6 +40,13 @@ const sqlLiteral = (v: string | null) =>
   v === null ? "NULL" : `'${v.replaceAll("'", "''")}'`;
 const tsv = (v: string | null) =>
   v === null ? "\\N" : /[\t\n\r"]/.test(v) ? `"${v.replaceAll('"', '""')}"` : v;
+// PostgreSQL CSV uses unquoted empty for NULL and quoted empty for empty text.
+const csvField = (value: string | null) =>
+  value === null
+    ? ""
+    : value === "" || /[,\r\n"]/.test(value)
+      ? `"${value.replaceAll('"', '""')}"`
+      : value;
 export const ResultsGrid = memo(function ResultsGrid({
   result,
   sort,
@@ -69,6 +78,8 @@ export const ResultsGrid = memo(function ResultsGrid({
   const [end, setEnd] = useState<Point>({ row: 0, col: 0 });
   const [inspect, setInspect] = useState(false);
   const [copyState, setCopyState] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState("");
   const drag = useRef<AbortController | null>(null);
   useEffect(() => () => drag.current?.abort(), []);
   const columns = useMemo(
@@ -170,6 +181,29 @@ export const ResultsGrid = memo(function ResultsGrid({
       .join("\n");
     await writeClipboard(text);
   }
+  async function exportCSV() {
+    setExporting(true);
+    setExportError("");
+    try {
+      const rowCount = result.rows.length;
+      const summary = `${rowCount.toLocaleString()} displayed ${rowCount === 1 ? "row" : "rows"}`;
+      const path = await saveDialog({
+        defaultPath: "results.csv",
+        title: `Export ${summary}${result.truncated ? " (limited result)" : ""}`,
+        filters: [{ name: "CSV", extensions: ["csv"] }],
+      });
+      if (!path) return;
+      const header = result.columns.map((column) => column.name);
+      const csv = [header, ...result.rows]
+        .map((row) => row.map(csvField).join(","))
+        .join("\r\n");
+      await api.writeCSV(path, csv + "\r\n");
+    } catch (error) {
+      setExportError(asError(error).message);
+    } finally {
+      setExporting(false);
+    }
+  }
   function move(point: Point, extend = false) {
     point = {
       row: Math.max(0, Math.min(result.rows.length - 1, point.row)),
@@ -220,6 +254,15 @@ export const ResultsGrid = memo(function ResultsGrid({
           {copyState || "Copy"}
         </Button>
         <Button
+          className="quiet"
+          onClick={() => void exportCSV()}
+          disabled={exporting}
+          title="Save the displayed rows and columns"
+        >
+          <Download size={13} aria-hidden="true" />
+          Export CSV
+        </Button>
+        <Button
           className="icon quiet"
           aria-label="Inspect selected row"
           aria-pressed={inspect}
@@ -228,6 +271,12 @@ export const ResultsGrid = memo(function ResultsGrid({
           <PanelRightOpen size={15} />
         </Button>
       </div>
+      {exportError && (
+        <div className="query-error" role="alert">
+          <strong>Couldn’t export CSV</strong>
+          <p>{exportError}</p>
+        </div>
+      )}
       <div
         className="grid-and-inspector"
         style={
