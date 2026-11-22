@@ -319,20 +319,22 @@ async fn save_sql_document(
     let _guard = state.files.lock().await;
     sql_documents::save(&state.root.join("sql-documents"), &document).await
 }
-fn sql_path(path: &str) -> Result<PathBuf, DbError> {
+fn file_path(path: &str, extension: &str) -> Result<PathBuf, DbError> {
     let path = PathBuf::from(path);
     if !path.is_absolute()
         || !path
             .extension()
-            .is_some_and(|e| e.eq_ignore_ascii_case("sql"))
+            .is_some_and(|e| e.eq_ignore_ascii_case(extension))
     {
-        return Err(err("Choose an absolute .sql file path"));
+        return Err(err(format!("Choose an absolute .{extension} file path")));
     }
     Ok(path)
 }
 #[tauri::command]
 async fn read_sql_file(path: String) -> Result<String, DbError> {
-    let file = tokio::fs::File::open(sql_path(&path)?).await.map_err(err)?;
+    let file = tokio::fs::File::open(file_path(&path, "sql")?)
+        .await
+        .map_err(err)?;
     use tokio::io::AsyncReadExt;
     let mut source = String::new();
     file.take(1024 * 1024 + 1)
@@ -349,8 +351,17 @@ async fn write_sql_file(path: String, source: String) -> Result<(), DbError> {
     if source.len() > 1024 * 1024 {
         return Err(err("SQL file exceeds 1 MiB"));
     }
-    atomic_write(&sql_path(&path)?, source.as_bytes()).await
+    atomic_write(&file_path(&path, "sql")?, source.as_bytes()).await
 }
+#[tauri::command]
+async fn write_csv_file(path: String, source: String) -> Result<(), DbError> {
+    // The retained values are capped at 8 MiB before CSV escaping and separators.
+    if source.len() > 24 * 1024 * 1024 {
+        return Err(err("CSV file exceeds 24 MiB"));
+    }
+    atomic_write(&file_path(&path, "csv")?, source.as_bytes()).await
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -388,6 +399,7 @@ pub fn run() {
             delete_notebook,
             read_sql_file,
             write_sql_file,
+            write_csv_file,
             list_connections,
             save_connection,
             delete_connection,
@@ -407,6 +419,23 @@ pub fn run() {
 #[cfg(test)]
 mod file_tests {
     use super::*;
+    #[tokio::test]
+    async fn csv_file_preserves_bytes_and_requires_an_absolute_csv_path() {
+        let path = std::env::temp_dir().join(format!("kasane-{}.csv", Uuid::new_v4()));
+        let csv = "first,second\r\n重ね,\"\"\r\n";
+        write_csv_file(path.to_string_lossy().into_owned(), csv.into())
+            .await
+            .unwrap();
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), csv.as_bytes());
+        tokio::fs::remove_file(path).await.unwrap();
+        assert!(write_csv_file("relative.csv".into(), csv.into())
+            .await
+            .is_err());
+        assert!(write_csv_file("/tmp/kasane.csv.sql".into(), csv.into())
+            .await
+            .is_err());
+    }
+
     #[tokio::test]
     async fn sql_file_round_trip_and_limits() {
         let path = std::env::temp_dir().join(format!("kasane-{}.sql", Uuid::new_v4()));
