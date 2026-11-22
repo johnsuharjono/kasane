@@ -332,6 +332,25 @@ export default function App() {
       setNotice(asError(e).message);
     }
   }
+  async function executeInDocument(t: Tab, requestId: string, source: string) {
+    const request: { cancelled: boolean; sessionId?: string } = {
+      cancelled: false,
+    };
+    queryRequests.current.set(requestId, request);
+    try {
+      const sessionId = await sessionFor(t);
+      if (request.cancelled)
+        throw {
+          message: "Cancelled before sending SQL to PostgreSQL.",
+          code: "57014",
+        };
+      request.sessionId = sessionId;
+      const result = await api.execute(sessionId, requestId, source);
+      return { sessionId, result };
+    } finally {
+      queryRequests.current.delete(requestId);
+    }
+  }
   async function sessionFor(t: Tab) {
     if (t.disconnected)
       throw new Error(
@@ -352,25 +371,6 @@ export default function App() {
     }
     patch(t.id, (x) => ({ ...x, sessionId: id }));
     return id;
-  }
-  async function executeInDocument(t: Tab, requestId: string, source: string) {
-    const request: { cancelled: boolean; sessionId?: string } = {
-      cancelled: false,
-    };
-    queryRequests.current.set(requestId, request);
-    try {
-      const sessionId = await sessionFor(t);
-      if (request.cancelled)
-        throw {
-          message: "Cancelled before sending SQL to PostgreSQL.",
-          code: "57014",
-        };
-      request.sessionId = sessionId;
-      const result = await api.execute(sessionId, requestId, source);
-      return { sessionId, result };
-    } finally {
-      queryRequests.current.delete(requestId);
-    }
   }
   async function runTable(t: Tab, settings: TableSettings) {
     if (!t.relation || busy.current.has(t.id)) return;
