@@ -42,7 +42,7 @@ export function ExecutionView({
         <div className="running-banner">
           <span className="spinner" />
           Running on your database…
-          <small>Cancel to request a PostgreSQL interrupt.</small>
+          <small>Cancel to stop a pending run or interrupt PostgreSQL.</small>
         </div>
       )}
       {e.error && (
