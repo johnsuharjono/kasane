@@ -31,7 +31,17 @@ Playwright runs the UI in WebKit and Chromium against real PostgreSQL through a 
 - Grid selection, copying, inspection, column resizing, and virtualization.
 - Panel resizing, appearance, editor preferences, and compact notebook results.
 
-Browser tests do not exercise native Keychain access, Tauri IPC, or the macOS window. Check those in the desktop app before a release.
+GitHub Actions runs these checks on macOS with both fixtures, then builds and validates the debug app bundle. Browser tests substitute Keychain, Tauri IPC, the clipboard, and native dialogs.
+
+## Native macOS smoke test
+
+Use a disposable local fixture profile and a temporary directory for files. Start and seed the fixture, then run `make build` and open `src-tauri/target/debug/bundle/macos/Kasane.app`.
+
+1. Add a new fixture connection. Enter the fixture password, use **Test connection**, and save. Quit Kasane, reopen it, and confirm that the saved workspace connects without re-entering the password.
+2. Browse `commerce.orders`. Open **Structure**, check that the primary key column is marked, then switch back to **Data** and page forward. Run `SELECT pg_sleep(15)` in a SQL document, cancel it, and check that `SELECT 1` works in the same session.
+3. Import a temporary `.sql` file through the native Open dialog. Run it, export it to a second file using the native Save dialog, and check the new file contents. If CSV export is available in the build, export the displayed query rows and check the header and data in the saved file.
+4. In the grid, copy a selected value and paste it into a local text editor. Open Settings with ⌘, and check that switching appearance updates the app and native window.
+5. Remove the temporary connection and files. Record the app revision, macOS version, and any failure with the release notes for the test run.
 
 ## Multiple connections
 

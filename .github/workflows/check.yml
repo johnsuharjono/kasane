@@ -1,0 +1,75 @@
+name: macOS checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-checks-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: macos-26
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: "0"
+      CARGO_PROFILE_DEV_DEBUG: "0"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install tools
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+          brew list postgresql@18 >/dev/null 2>&1 || brew install postgresql@18
+          npm ci
+          npx playwright install chromium webkit
+      - name: Seed PostgreSQL and run checks
+        env:
+          KASANE_MULTI_TEST: "1"
+        run: |
+          pg_bin="$(brew --prefix postgresql@18)/bin"
+          fixture="$(mktemp -d "$RUNNER_TEMP/kasane-db.XXXXXX")"
+          stop_fixtures() {
+            for name in commerce analytics; do
+              "$pg_bin/pg_ctl" -D "$fixture/$name" -m fast stop || true
+            done
+          }
+          trap stop_fixtures EXIT
+
+          printf '%s\n' kasane_dev_only > "$fixture/password"
+          for name in commerce analytics; do
+            if [ "$name" = commerce ]; then
+              port=55432
+              database=kasane_dev
+            else
+              port=55433
+              database=kasane_analytics
+            fi
+            "$pg_bin/initdb" -D "$fixture/$name" -U kasane \
+              --auth-local=trust --auth-host=scram-sha-256 --pwfile="$fixture/password"
+            "$pg_bin/pg_ctl" -D "$fixture/$name" -l "$fixture/$name.log" \
+              -o "-h 127.0.0.1 -p $port -k $fixture" -w start
+            "$pg_bin/createdb" -h "$fixture" -p "$port" -U kasane "$database"
+          done
+          rm "$fixture/password"
+
+          make db-seed db-verify db-seed-analytics
+          make check
+      - name: Build and validate the macOS bundle
+        run: |
+          make build
+          bundle=src-tauri/target/debug/bundle/macos/Kasane.app
+          plutil -lint "$bundle/Contents/Info.plist"
+          test -x "$bundle/Contents/MacOS/kasane"
