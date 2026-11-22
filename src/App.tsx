@@ -186,6 +186,9 @@ export default function App() {
     Number(localStorage.getItem("kasane.sidebarWidth")) || 252,
   );
   const busy = useRef(new Set<string>());
+  const queryRequests = useRef(
+    new Map<string, { cancelled: boolean; sessionId?: string }>(),
+  );
   const catalogCache = useRef(new Map<string, Relation[]>());
   const activeConnection = connections.find((c) => c.id === tab?.connectionId);
   const refresh = async () => {
@@ -329,6 +332,25 @@ export default function App() {
       setNotice(asError(e).message);
     }
   }
+  async function executeInDocument(t: Tab, requestId: string, source: string) {
+    const request: { cancelled: boolean; sessionId?: string } = {
+      cancelled: false,
+    };
+    queryRequests.current.set(requestId, request);
+    try {
+      const sessionId = await sessionFor(t);
+      if (request.cancelled)
+        throw {
+          message: "Cancelled before sending SQL to PostgreSQL.",
+          cancelled: true,
+        };
+      request.sessionId = sessionId;
+      const result = await api.execute(sessionId, requestId, source);
+      return { sessionId, result };
+    } finally {
+      queryRequests.current.delete(requestId);
+    }
+  }
   async function sessionFor(t: Tab) {
     if (t.disconnected)
       throw new Error(
@@ -358,8 +380,11 @@ export default function App() {
     patch(t.id, (t) => ({ ...t, tableSettings: settings }));
     setExecution(t.id, "table-data", { state: "running", requestId, source });
     try {
-      const sessionId = await sessionFor(t);
-      const fetched = await api.execute(sessionId, requestId, source);
+      const { sessionId, result: fetched } = await executeInDocument(
+        t,
+        requestId,
+        source,
+      );
       const pageSize = TABLE_PAGE_SIZE;
       const rows = fetched.rows.slice(0, pageSize);
       const result = { ...fetched, rows, returnedRows: String(rows.length) };
@@ -438,8 +463,11 @@ export default function App() {
         });
         // Session state may have been changed by a preceding cell; never reconnect/retry a failed execution.
         try {
-          const sessionId = await sessionFor(current);
-          const result = await api.execute(sessionId, requestId, source);
+          const { result } = await executeInDocument(
+            current,
+            requestId,
+            source,
+          );
           setExecution(t.id, cellId, {
             state: "success",
             requestId,
@@ -471,12 +499,16 @@ export default function App() {
     const running = Object.values(t.executions).find(
       (e) => e.state === "running",
     );
-    if (t.sessionId && running)
-      try {
-        await api.cancel(t.sessionId, running.requestId);
-      } catch (e) {
-        setNotice(asError(e).message);
-      }
+    if (!running) return;
+    const request = queryRequests.current.get(running.requestId);
+    if (request) request.cancelled = true;
+    const sessionId = request ? request.sessionId : t.sessionId;
+    if (!sessionId) return;
+    try {
+      await api.cancel(sessionId, running.requestId);
+    } catch (e) {
+      setNotice(asError(e).message);
+    }
   }
   async function openSQLFile() {
     try {

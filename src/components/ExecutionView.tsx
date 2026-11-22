@@ -42,13 +42,13 @@ export function ExecutionView({
         <div className="running-banner">
           <span className="spinner" />
           Running on your database…
-          <small>Cancel to request a PostgreSQL interrupt.</small>
+          <small>Cancel to stop a pending run or interrupt PostgreSQL.</small>
         </div>
       )}
       {e.error && (
         <div className="query-error" role="alert">
           <strong>
-            {e.error.code === "57014"
+            {e.error.cancelled || e.error.code === "57014"
               ? "Query cancelled"
               : e.error.disconnected
                 ? "Session disconnected"
