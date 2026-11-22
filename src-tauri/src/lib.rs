@@ -1,7 +1,7 @@
 mod db;
 mod menu;
 mod sql_documents;
-use db::{Connection, DbError, QueryResult, Session, CONNECTION_COLORS};
+use db::{Connection, DbError, QueryResult, RelationStructure, Session, CONNECTION_COLORS};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, path::PathBuf, sync::Arc};
 use tauri::{Manager, State};
@@ -208,6 +208,18 @@ async fn get_catalog(
 ) -> Result<QueryResult, DbError> {
     session(&state, &session_id).await?.catalog().await
 }
+#[tauri::command]
+async fn get_relation_structure(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    relation: String,
+) -> Result<RelationStructure, DbError> {
+    session(&state, &session_id)
+        .await?
+        .relation_structure(&schema, &relation)
+        .await
+}
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Notebook {
@@ -397,6 +409,7 @@ pub fn run() {
             execute_sql,
             cancel_query,
             get_catalog,
+            get_relation_structure,
             save_notebook,
             list_notebooks
         ])

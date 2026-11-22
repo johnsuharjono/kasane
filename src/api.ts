@@ -5,6 +5,7 @@ import type {
   Notebook,
   Result,
   Relation,
+  RelationStructure,
   SQLDocument,
 } from "./types";
 export const native = isTauri();
@@ -46,6 +47,12 @@ export const api = {
   notebooks: () => call<Notebook[]>("list_notebooks"),
   saveNotebook: (notebook: Notebook) =>
     call<void>("save_notebook", { notebook }),
+  structure: (sessionId: string, schema: string, relation: string) =>
+    call<RelationStructure>("get_relation_structure", {
+      sessionId,
+      schema,
+      relation,
+    }),
   async catalog(sessionId: string): Promise<Relation[]> {
     const result = await call<Result>("get_catalog", { sessionId });
     if (result.truncated)

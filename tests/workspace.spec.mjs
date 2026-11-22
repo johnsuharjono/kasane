@@ -30,6 +30,10 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
   const sqlDocuments = new Map();
   let dialogSaves = 0;
   const sqlPath = "/tmp/kasane-workspace-test.sql";
+  const relationStructure = await readFile(
+    "src-tauri/src/relation_structure.sql",
+    "utf8",
+  );
   await page.exposeFunction("kasaneTestInvoke", async (command, args = {}) => {
     if (command === "plugin:window|set_theme") return;
     if (command === "list_sql_documents") return [...sqlDocuments.values()];
@@ -72,6 +76,12 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
       await sessions.get(args.sessionId)?.end();
       sessions.delete(args.sessionId);
       return;
+    }
+    if (command === "get_relation_structure") {
+      const result = await sessions
+        .get(args.sessionId)
+        .query(relationStructure, [args.schema, args.relation]);
+      return JSON.parse(result.rows[0].structure);
     }
     if (command === "get_catalog" || command === "execute_sql") {
       const t = performance.now();
@@ -196,7 +206,15 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     const beforeStructure = queries.length;
     await page.getByTitle("Open commerce.customers").click({ button: "right" });
     await page.getByRole("menuitem", { name: "View Structure" }).click();
-    await expect(page.locator(".structure-view")).toContainText("Nullable");
+    await expect(page.getByRole("region", { name: "Columns" })).toContainText(
+      "Nullable",
+    );
+    await expect(
+      page.getByRole("region", { name: "Constraints" }),
+    ).toContainText("PRIMARY KEY (id)");
+    await expect(page.getByRole("region", { name: "Indexes" })).toContainText(
+      "customers_email_lower_idx",
+    );
     expect(queries.length).toBe(beforeStructure);
     await page.getByRole("tab", { name: "Data", exact: true }).click();
     await expect(page.getByRole("grid")).toBeVisible();

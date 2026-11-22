@@ -46,9 +46,9 @@ Rust writes source-only, versioned notebook JSON through temporary-file replacem
 
 Stored source can contain user-entered sensitive SQL. There is no assumption that separating connection passwords makes all notebook content public. Disk encryption/backup and source hygiene remain user concerns.
 
-## Next structural layer
+## Relation structure
 
-The fixture includes FK constraints, a self-reference, composite primary keys, multiple index methods, expression/partial/covering indexes, comments, enum columns and generated columns. A future Structure tab should query `pg_catalog` for ordered constraint columns, FK actions, index definitions/methods, comments and view definitions. Build a typed metadata model first; render the relationship graph from that model later. Avoid guessing relations from column names or parsing display SQL when catalog OIDs identify objects accurately.
+Structure loads metadata on demand through the connection's explorer session. A parameterized catalog query reads column defaults, identity and generated expressions, comments, constraints, indexes, and view definitions. PostgreSQL supplies ordered key definitions, including composite foreign keys and their actions. Refresh structure reads the catalog again after a schema change.
 
 ## SQL files and panel layouts
 
