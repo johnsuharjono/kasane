@@ -134,6 +134,10 @@ export default function App() {
   const browseSession =
     browser?.connectionId === selected ? browser.sessionId : "";
   const [ready, setReady] = useState(false);
+  const [tableCountResults, setTableCountResults] = useState<
+    Record<string, Execution>
+  >({});
+  const tableCounts = useRef(new Map<string, () => void>());
   const [connecting, setConnecting] = useState(false);
   const [revision, setRevision] = useState(0);
   const [paused, setPaused] = useState<string | null>(null);
@@ -281,6 +285,7 @@ export default function App() {
       .getState()
       .tabs.filter((t) => t.connectionId === selected);
     for (const document of documents) {
+      stopTableCount(document.id);
       patch(document.id, (t) => ({
         ...t,
         sessionId: undefined,
@@ -372,11 +377,19 @@ export default function App() {
     patch(t.id, (x) => ({ ...x, sessionId: id }));
     return id;
   }
-  async function runTable(t: Tab, settings: TableSettings) {
+  async function runTable(
+    t: Tab,
+    settings: TableSettings,
+    refreshCount = false,
+  ) {
     if (!t.relation || busy.current.has(t.id)) return;
     busy.current.add(t.id);
     const requestId = uid(),
       source = tableQuery(t.relation, settings);
+    const countSource = tableCountQuery(t.relation, settings);
+    const previousCount = tableCountResults[t.id];
+    const needsCount = refreshCount || previousCount?.source !== countSource;
+    if (needsCount) stopTableCount(t.id);
     patch(t.id, (t) => ({ ...t, tableSettings: settings }));
     setExecution(t.id, "table-data", { state: "running", requestId, source });
     try {
@@ -395,8 +408,11 @@ export default function App() {
         source,
         result,
       });
-      // Load rows first, then update the exact total for the same filter.
-      await countTable(t, settings, sessionId);
+      const current = useWorkspace
+        .getState()
+        .tabs.find((tab) => tab.id === t.id);
+      if (needsCount && current?.sessionId === sessionId)
+        void countTable(current, countSource);
     } catch (e) {
       const error = asError(e);
       setExecution(t.id, "table-data", {
@@ -411,32 +427,54 @@ export default function App() {
       busy.current.delete(t.id);
     }
   }
-  async function countTable(
-    t: Tab,
-    settings: TableSettings,
-    sessionId: string,
-  ) {
+  function stopTableCount(tabId: string) {
+    const stop = tableCounts.current.get(tabId);
+    tableCounts.current.delete(tabId);
+    stop?.();
+    setTableCountResults((counts) => {
+      if (!counts[tabId]) return counts;
+      const next = { ...counts };
+      delete next[tabId];
+      return next;
+    });
+  }
+  async function countTable(t: Tab, source: string) {
     const requestId = uid(),
-      source = tableCountQuery(t.relation!, settings);
-    setExecution(t.id, "table-count", { state: "running", requestId, source });
+      sessionId = uid();
+    let opened = false;
+    const release = () => {
+      if (!opened) return;
+      opened = false;
+      void api.close(sessionId).catch(() => {});
+    };
+    const isCurrent = () => tableCounts.current.get(t.id) === release;
+    const setCount = (execution: Execution) =>
+      setTableCountResults((counts) => ({ ...counts, [t.id]: execution }));
+    tableCounts.current.set(t.id, release);
+    setCount({ state: "running", requestId, source });
     try {
+      await api.open(t.connectionId!, sessionId);
+      opened = true;
+      if (!isCurrent()) return;
       const result = await api.execute(sessionId, requestId, source);
-      setExecution(t.id, "table-count", {
-        state: "success",
-        requestId,
-        source,
-        result,
-      });
+      if (isCurrent())
+        setCount({
+          state: "success",
+          requestId,
+          source,
+          result,
+        });
     } catch (e) {
-      const error = asError(e);
-      setExecution(t.id, "table-count", {
-        state: "failed",
-        requestId,
-        source,
-        error,
-      });
-      if (error.disconnected)
-        patch(t.id, (t) => ({ ...t, disconnected: true }));
+      if (isCurrent())
+        setCount({
+          state: "failed",
+          requestId,
+          source,
+          error: asError(e),
+        });
+    } finally {
+      if (isCurrent()) tableCounts.current.delete(t.id);
+      release();
     }
   }
   async function runCells(t: Tab, cellIds: string[]) {
@@ -611,6 +649,7 @@ export default function App() {
       if (useWorkspace.getState().tabs.find((x) => x.id === t.id)?.dirty)
         return;
     }
+    stopTableCount(t.id);
     if (t.sessionId) await api.close(t.sessionId).catch(() => {});
     close(t.id);
   }
@@ -989,7 +1028,7 @@ export default function App() {
     }));
   }
   function refreshTable(t: Tab) {
-    void runTable(t, t.tableSettings ?? defaultTableSettings);
+    void runTable(t, t.tableSettings ?? defaultTableSettings, true);
   }
   // Tabs scroll horizontally; those outside the strip are listed in a "+N" menu.
   useLayoutEffect(() => {
@@ -1659,6 +1698,8 @@ export default function App() {
                     key={tab.id}
                     tab={tab}
                     onExecute={(settings) => void runTable(tab, settings)}
+                    count={tableCountResults[tab.id]}
+                    onCancelCount={() => stopTableCount(tab.id)}
                     onOpenReference={openReference}
                   />
                 )}

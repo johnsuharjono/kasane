@@ -1,6 +1,6 @@
 import { SelectField } from "./SelectField";
 import { Input } from "./ui/input";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useDelayed } from "../use-delayed";
 import {
   ChevronLeft,
@@ -20,7 +20,7 @@ import {
   tableCountQuery,
 } from "../table-query";
 import { usePreferences } from "../preferences";
-import type { ColumnReference, Tab, TableSettings } from "../types";
+import type { ColumnReference, Execution, Tab, TableSettings } from "../types";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -32,10 +32,14 @@ import {
 export function TableBrowser({
   tab,
   onExecute,
+  count,
+  onCancelCount,
   onOpenReference,
 }: {
   tab: Tab;
   onExecute: (settings: TableSettings) => void;
+  count?: Execution;
+  onCancelCount: () => void;
   onOpenReference: (reference: ColumnReference, value: string) => void;
 }) {
   const settings = tab.tableSettings ?? defaultTableSettings;
@@ -46,33 +50,19 @@ export function TableBrowser({
   }, [settings.filterColumn, settings.filterOperator, settings.filterValue]);
   const execution = tab.executions["table-data"];
   const { autoPreview } = usePreferences();
-  const running = Object.values(tab.executions).some(
-    (e) => e.state === "running",
-  );
+  const running = execution?.state === "running";
   // Controls dim only for slow work; App's busy guard drops clicks meanwhile.
   const busy = useDelayed(running);
   const page = pageFor(settings),
     pageSize = TABLE_PAGE_SIZE;
-  const count = tab.executions["table-count"];
   const validCount =
     count?.source === tableCountQuery(tab.relation!, settings) &&
     !count.outdated;
-  // Keep showing the previous count for this filter while the refreshed total loads.
-  const lastCount = useRef<{ source: string; total: string }>(undefined);
-  if (validCount && count.state === "success" && count.result?.rows[0]?.[0])
-    lastCount.current = {
-      source: count.source,
-      total: count.result.rows[0][0],
-    };
   const total =
     validCount && count.state === "success"
       ? count.result?.rows[0]?.[0]
-      : validCount &&
-          count.state === "running" &&
-          lastCount.current?.source === count.source
-        ? lastCount.current.total
-        : undefined;
-  const counting = useDelayed(count?.state === "running");
+      : undefined;
+  const counting = useDelayed(validCount && count?.state === "running");
   const totalPages = total
     ? (BigInt(total) + BigInt(pageSize) - 1n) / BigInt(pageSize)
     : undefined;
@@ -264,6 +254,11 @@ export function TableBrowser({
             "Counting…"
           ) : null}
         </span>
+        {counting && (
+          <Button className="quiet small" onClick={onCancelCount}>
+            Cancel count
+          </Button>
+        )}
       </div>
       {!execution && (tab.restored || !autoPreview) ? (
         <div className="execution-empty">

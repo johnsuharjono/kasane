@@ -334,9 +334,6 @@ test("late explorer responses cannot replace another workspace", async ({
     );
     await page.getByTitle("Open workspace.deployments").click();
     await expect(page.getByRole("grid")).toBeVisible();
-    const before = bridge.events.filter(
-      (e) => e.command === "execute_sql",
-    ).length;
     await page.getByRole("button", { name: "Switch connection" }).click();
     await page
       .getByRole("menuitem", { name: "Disconnect", exact: true })
@@ -348,6 +345,9 @@ test("late explorer responses cannot replace another workspace", async ({
       page.getByRole("button", { name: "Reconnect session", exact: true }),
     ).toBeVisible();
     await expect.poll(() => bridge.sessions.size).toBe(0);
+    const before = bridge.events.filter(
+      (e) => e.command === "execute_sql",
+    ).length;
     await page.getByRole("button", { name: "Switch connection" }).click();
     await page.getByRole("menuitem", { name: "Connect", exact: true }).click();
     await expect(page.getByTitle("Open workspace.deployments")).toBeVisible();

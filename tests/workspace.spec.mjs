@@ -192,6 +192,7 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     );
     await page.getByRole("button", { name: "Clear filter" }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("1000");
+    await expect(page.locator(".page-range")).toContainText("of 1,000 rows");
     const beforeStructure = queries.length;
     await page.getByTitle("Open commerce.customers").click({ button: "right" });
     await page.getByRole("menuitem", { name: "View Structure" }).click();
