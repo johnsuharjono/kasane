@@ -2432,15 +2432,49 @@
     font: 500 12.5px var(--mono);
     color: var(--foreground);
   }
-  .structure-view .column-name .pk-icon {
+  .structure-view .pk-icon {
+    display: inline-block;
     margin-left: 6px;
+    color: var(--primary);
+    vertical-align: middle;
   }
   .structure-view .column-type {
     font: 12px var(--mono);
     color: var(--muted-foreground);
   }
-  .structure-view .not-null {
+  .structure-actions {
+    display: flex;
+    justify-content: flex-end;
+  }
+  .structure-view section + section {
+    margin-top: 22px;
+  }
+  .structure-view h2 {
+    margin-bottom: 8px;
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .structure-view td {
+    padding-block: 6px;
+    overflow-wrap: anywhere;
+  }
+  .structure-comment, .structure-label {
     color: var(--muted-foreground);
+    white-space: pre-wrap;
+  }
+  .structure-label {
+    display: block;
+    font-size: 11px;
+  }
+  .structure-view pre {
+    padding: 14px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+  .structure-view code, .structure-view pre {
+    font: 12px/1.55 var(--mono);
   }
   .filter-summary {
     display: flex;

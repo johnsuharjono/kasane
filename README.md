@@ -4,7 +4,7 @@
 
 A macOS PostgreSQL client with SQL documents and notebooks.
 
-- Browse schemas, tables, views, and columns.
+- Browse schemas, tables, and views. Inspect columns, constraints, indexes, comments, and view definitions.
 - Filter, sort, page through and hide columns of table data, and follow foreign keys to related rows.
 - Write SQL with schema-aware completion and run it with ⌘Enter.
 - Combine Markdown and SQL in notebooks with a shared session.

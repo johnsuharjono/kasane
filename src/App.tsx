@@ -11,6 +11,7 @@ import {
   open as openDialog,
   save as saveDialog,
 } from "@tauri-apps/plugin-dialog";
+import { StructureView } from "./components/StructureView";
 import { TableBrowser } from "./components/TableBrowser";
 import { ExecutionView } from "./components/ExecutionView";
 import {
@@ -60,7 +61,6 @@ import {
   Code2,
   Eye,
   Filter,
-  KeyRound,
   ChevronRight,
   Database,
   FileCode2,
@@ -1585,43 +1585,11 @@ export default function App() {
                     ))}
                 </Tabs>
                 {tab.view === "structure" ? (
-                  <div className="structure-view">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th className="ordinal">#</th>
-                          <th>Column</th>
-                          <th>Type</th>
-                          <th>Nullable</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {tab.relation.columns.map((c, i) => (
-                          <tr key={c.name}>
-                            <td className="ordinal">{i + 1}</td>
-                            <td className="column-name">
-                              {c.name}
-                              {c.primaryKeyPosition !== undefined && (
-                                <KeyRound
-                                  size={12}
-                                  className="pk-icon"
-                                  aria-label="Primary key"
-                                />
-                              )}
-                            </td>
-                            <td className="column-type">{c.type}</td>
-                            <td>
-                              {c.required ? (
-                                <span className="not-null">not null</span>
-                              ) : (
-                                <span className="value-chip">nullable</span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <StructureView
+                    key={JSON.stringify([tab.id, browseSession])}
+                    relation={tab.relation}
+                    sessionId={browseSession}
+                  />
                 ) : (
                   <TableBrowser
                     key={tab.id}

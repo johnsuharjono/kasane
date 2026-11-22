@@ -146,6 +146,22 @@ impl Session {
         self.execute_with_limits("catalog", CATALOG, 100_000, 16 * 1024 * 1024)
             .await
     }
+    pub async fn relation_structure(
+        &self,
+        schema: &str,
+        relation: &str,
+    ) -> Result<RelationStructure, DbError> {
+        let client = self.client.lock().await;
+        let row = client
+            .query_opt(
+                include_str!("relation_structure.sql"),
+                &[&schema, &relation],
+            )
+            .await?
+            .ok_or_else(|| DbError::message("Relation no longer exists."))?;
+        let structure: &str = row.try_get("structure")?;
+        serde_json::from_str(structure).map_err(|e| DbError::message(e.to_string()))
+    }
     async fn execute_with_limits(
         &self,
         request_id: &str,
@@ -252,6 +268,43 @@ pub struct QueryResult {
     pub bytes: usize,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RelationStructure {
+    comment: Option<String>,
+    view_definition: Option<String>,
+    columns: Vec<StructureColumn>,
+    constraints: Vec<StructureConstraint>,
+    indexes: Vec<StructureIndex>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct StructureColumn {
+    name: String,
+    data_type: String,
+    required: bool,
+    primary_key: bool,
+    default_expression: Option<String>,
+    generated_expression: Option<String>,
+    identity: Option<String>,
+    comment: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct StructureConstraint {
+    name: String,
+    definition: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct StructureIndex {
+    name: String,
+    method: String,
+    definition: String,
+    valid: bool,
+}
+
 pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position, CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint::text END AS estimated_rows, fk.sch AS fk_schema, fk.rel AS fk_table, fk.col AS fk_column FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped LEFT JOIN LATERAL (SELECT tn.nspname AS sch, t.relname AS rel, ta.attname AS col FROM pg_catalog.pg_constraint con JOIN pg_catalog.pg_class t ON t.oid=con.confrelid JOIN pg_catalog.pg_namespace tn ON tn.oid=t.relnamespace JOIN pg_catalog.pg_attribute ta ON ta.attrelid=t.oid AND ta.attnum=con.confkey[1] WHERE con.conrelid=c.oid AND con.contype='f' AND cardinality(con.conkey)=1 AND con.conkey[1]=a.attnum ORDER BY con.conname LIMIT 1) fk ON true WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
 
 #[cfg(test)]
@@ -289,6 +342,35 @@ mod tests {
             color: None,
         };
         let s = Session::connect(&c, "kasane_dev_only").await.unwrap();
+        let structure = s
+            .relation_structure("commerce", "order_items")
+            .await
+            .unwrap();
+        assert!(structure.columns.iter().any(|c| {
+            c.name == "total"
+                && c.generated_expression
+                    .as_deref()
+                    .is_some_and(|e| e.contains("unit_price"))
+        }));
+        assert!(structure
+            .constraints
+            .iter()
+            .any(|c| c.definition == "PRIMARY KEY (order_id, line_number)"));
+        assert!(structure
+            .constraints
+            .iter()
+            .any(|c| c.definition.contains("FOREIGN KEY (order_id)")));
+        assert!(structure
+            .indexes
+            .iter()
+            .any(|i| i.name == "order_items_product_idx" && i.method == "btree"));
+        let view = s
+            .relation_structure("commerce", "order_summary")
+            .await
+            .unwrap();
+        assert!(view.view_definition.is_some());
+        assert!(s.relation_structure("lab", "Odd table").await.is_ok());
+        assert!(s.relation_structure("lab", "missing").await.is_err());
         let catalog = s.catalog().await.unwrap();
         let item_keys: Vec<_> = catalog
             .rows

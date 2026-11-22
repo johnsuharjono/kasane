@@ -53,6 +53,27 @@ export type Relation = {
     references?: ColumnReference;
   }[];
 };
+export type RelationStructure = {
+  comment: string | null;
+  viewDefinition: string | null;
+  columns: {
+    name: string;
+    dataType: string;
+    required: boolean;
+    primaryKey: boolean;
+    defaultExpression: string | null;
+    generatedExpression: string | null;
+    identity: "always" | "by default" | null;
+    comment: string | null;
+  }[];
+  constraints: { name: string; definition: string }[];
+  indexes: {
+    name: string;
+    method: string;
+    definition: string;
+    valid: boolean;
+  }[];
+};
 export type ColumnReference = { schema: string; table: string; column: string };
 export type Cell = { id: string; kind: "markdown" | "sql"; source: string };
 export type Notebook = {
