@@ -185,7 +185,8 @@ export const ResultsGrid = memo(function ResultsGrid({
     setExporting(true);
     setExportError("");
     try {
-      const summary = `${result.rows.length.toLocaleString()} displayed rows`;
+      const rowCount = result.rows.length;
+      const summary = `${rowCount.toLocaleString()} displayed ${rowCount === 1 ? "row" : "rows"}`;
       const path = await saveDialog({
         defaultPath: "results.csv",
         title: `Export ${summary}${result.truncated ? " (limited result)" : ""}`,
