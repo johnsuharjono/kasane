@@ -16,14 +16,16 @@ Kasane is in development. Table data is read-only; SQL statements can modify you
 
 ## Development
 
-Requires macOS, Xcode Command Line Tools, stable Rust, and Node.js 24+. Docker is needed for the sample databases.
+Requires macOS, Xcode Command Line Tools, stable Rust, Bun 1.4.3, and Node.js 24+. Docker is needed for the sample databases.
 
 ```sh
 make setup
 make dev
 ```
 
-The frontend reloads as you edit; Rust changes rebuild the app. `npm run dev` runs only the frontend, without native database or file access.
+The frontend reloads as you edit; Rust changes rebuild the app. `bun run dev` runs only the frontend, without native database or file access.
+
+Bun installs dependencies and runs project commands. Vite, Playwright, and the database fixture scripts run on Node.js.
 
 To start a sample database:
 
@@ -45,7 +47,7 @@ make db-destroy    # Remove the sample databases and their volumes
 With the sample database running and seeded:
 
 ```sh
-npx playwright install chromium webkit
+bun run playwright install chromium webkit
 make check
 make build
 ```

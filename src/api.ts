@@ -15,7 +15,7 @@ export async function call<T>(
 ): Promise<T> {
   if (!native)
     throw new Error(
-      "Database connections and local notebooks require the Kasane desktop app. Run npm run tauri dev.",
+      "Database connections and local notebooks require the Kasane desktop app. Run bun run tauri dev.",
     );
   return invoke<T>(command, args);
 }
