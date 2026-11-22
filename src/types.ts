@@ -37,6 +37,7 @@ export type DbError = {
   detail?: string;
   hint?: string;
   disconnected?: boolean;
+  cancelled?: boolean;
 };
 export type Relation = {
   schema: string;

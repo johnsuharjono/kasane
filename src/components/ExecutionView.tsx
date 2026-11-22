@@ -48,7 +48,7 @@ export function ExecutionView({
       {e.error && (
         <div className="query-error" role="alert">
           <strong>
-            {e.error.code === "57014"
+            {e.error.cancelled || e.error.code === "57014"
               ? "Query cancelled"
               : e.error.disconnected
                 ? "Session disconnected"

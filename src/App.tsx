@@ -342,7 +342,7 @@ export default function App() {
       if (request.cancelled)
         throw {
           message: "Cancelled before sending SQL to PostgreSQL.",
-          code: "57014",
+          cancelled: true,
         };
       request.sessionId = sessionId;
       const result = await api.execute(sessionId, requestId, source);
