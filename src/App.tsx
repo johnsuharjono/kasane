@@ -186,6 +186,7 @@ export default function App() {
     Number(localStorage.getItem("kasane.sidebarWidth")) || 252,
   );
   const busy = useRef(new Set<string>());
+  const tableCounts = useRef(new Map<string, () => void>());
   const catalogCache = useRef(new Map<string, Relation[]>());
   const activeConnection = connections.find((c) => c.id === tab?.connectionId);
   const refresh = async () => {
@@ -278,6 +279,7 @@ export default function App() {
       .getState()
       .tabs.filter((t) => t.connectionId === selected);
     for (const document of documents) {
+      stopTableCount(document.id);
       patch(document.id, (t) => ({
         ...t,
         sessionId: undefined,
@@ -350,11 +352,23 @@ export default function App() {
     patch(t.id, (x) => ({ ...x, sessionId: id }));
     return id;
   }
-  async function runTable(t: Tab, settings: TableSettings) {
+  async function runTable(
+    t: Tab,
+    settings: TableSettings,
+    refreshCount = false,
+  ) {
     if (!t.relation || busy.current.has(t.id)) return;
     busy.current.add(t.id);
     const requestId = uid(),
       source = tableQuery(t.relation, settings);
+    const countSource = tableCountQuery(t.relation, settings);
+    const previousCount = t.executions["table-count"];
+    if (
+      refreshCount ||
+      previousCount?.source !== countSource ||
+      previousCount.outdated
+    )
+      stopTableCount(t.id);
     patch(t.id, (t) => ({ ...t, tableSettings: settings }));
     setExecution(t.id, "table-data", { state: "running", requestId, source });
     try {
@@ -370,8 +384,14 @@ export default function App() {
         source,
         result,
       });
-      // Load rows first, then update the exact total for the same filter.
-      await countTable(t, settings, sessionId);
+      const current = useWorkspace
+        .getState()
+        .tabs.find((tab) => tab.id === t.id);
+      if (
+        current?.sessionId === sessionId &&
+        !current.executions["table-count"]
+      )
+        void countTable(current, countSource);
     } catch (e) {
       const error = asError(e);
       setExecution(t.id, "table-data", {
@@ -386,32 +406,52 @@ export default function App() {
       busy.current.delete(t.id);
     }
   }
-  async function countTable(
-    t: Tab,
-    settings: TableSettings,
-    sessionId: string,
-  ) {
+  function stopTableCount(tabId: string) {
+    const stop = tableCounts.current.get(tabId);
+    tableCounts.current.delete(tabId);
+    stop?.();
+    patch(tabId, (tab) => {
+      if (!tab.executions["table-count"]) return tab;
+      const executions = { ...tab.executions };
+      delete executions["table-count"];
+      return { ...tab, executions };
+    });
+  }
+  async function countTable(t: Tab, source: string) {
     const requestId = uid(),
-      source = tableCountQuery(t.relation!, settings);
+      sessionId = uid();
+    let opened = false;
+    const release = () => {
+      if (!opened) return;
+      opened = false;
+      void api.close(sessionId).catch(() => {});
+    };
+    const isCurrent = () => tableCounts.current.get(t.id) === release;
+    tableCounts.current.set(t.id, release);
     setExecution(t.id, "table-count", { state: "running", requestId, source });
     try {
+      await api.open(t.connectionId!, sessionId);
+      opened = true;
+      if (!isCurrent()) return;
       const result = await api.execute(sessionId, requestId, source);
-      setExecution(t.id, "table-count", {
-        state: "success",
-        requestId,
-        source,
-        result,
-      });
+      if (isCurrent())
+        setExecution(t.id, "table-count", {
+          state: "success",
+          requestId,
+          source,
+          result,
+        });
     } catch (e) {
-      const error = asError(e);
-      setExecution(t.id, "table-count", {
-        state: "failed",
-        requestId,
-        source,
-        error,
-      });
-      if (error.disconnected)
-        patch(t.id, (t) => ({ ...t, disconnected: true }));
+      if (isCurrent())
+        setExecution(t.id, "table-count", {
+          state: "failed",
+          requestId,
+          source,
+          error: asError(e),
+        });
+    } finally {
+      if (isCurrent()) tableCounts.current.delete(t.id);
+      release();
     }
   }
   async function runCells(t: Tab, cellIds: string[]) {
@@ -468,9 +508,9 @@ export default function App() {
     }
   }
   async function cancel(t: Tab) {
-    const running = Object.values(t.executions).find(
-      (e) => e.state === "running",
-    );
+    const running = Object.entries(t.executions).find(
+      ([id, e]) => id !== "table-count" && e.state === "running",
+    )?.[1];
     if (t.sessionId && running)
       try {
         await api.cancel(t.sessionId, running.requestId);
@@ -570,7 +610,7 @@ export default function App() {
     }
   }
   async function closeTab(t: Tab) {
-    if (Object.values(t.executions).some((e) => e.state === "running")) {
+    if (busy.current.has(t.id)) {
       setNotice("Cancel the running query before closing this tab.");
       return;
     }
@@ -579,6 +619,7 @@ export default function App() {
       if (useWorkspace.getState().tabs.find((x) => x.id === t.id)?.dirty)
         return;
     }
+    stopTableCount(t.id);
     if (t.sessionId) await api.close(t.sessionId).catch(() => {});
     close(t.id);
   }
@@ -642,7 +683,10 @@ export default function App() {
   }, [selected]);
   const schemas = [...new Set(catalog.map((r) => r.schema))];
   const running =
-    !!tab && Object.values(tab.executions).some((e) => e.state === "running");
+    !!tab &&
+    Object.entries(tab.executions).some(
+      ([id, e]) => id !== "table-count" && e.state === "running",
+    );
   // Busy UI waits a moment so sub-second work (counts, small pages) doesn't flash.
   const showBusy = useDelayed(running);
   const currentCatalog =
@@ -957,7 +1001,7 @@ export default function App() {
     }));
   }
   function refreshTable(t: Tab) {
-    void runTable(t, t.tableSettings ?? defaultTableSettings);
+    void runTable(t, t.tableSettings ?? defaultTableSettings, true);
   }
   // Tabs scroll horizontally; those outside the strip are listed in a "+N" menu.
   useLayoutEffect(() => {
@@ -1627,6 +1671,7 @@ export default function App() {
                     key={tab.id}
                     tab={tab}
                     onExecute={(settings) => void runTable(tab, settings)}
+                    onCancelCount={() => stopTableCount(tab.id)}
                     onOpenReference={openReference}
                   />
                 )}

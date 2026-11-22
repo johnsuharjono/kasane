@@ -173,3 +173,57 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await bridge.close();
   }
 });
+
+test("paging proceeds while the same filtered count is pending", async ({
+  page,
+}) => {
+  const bridge = await installDatabaseBridge(page);
+  bridge.connections.push({
+    id: randomUUID(),
+    name: "Development",
+    database: "kasane_dev",
+    host: "127.0.0.1",
+    port: 55432,
+    username: "kasane",
+    tls: false,
+  });
+  try {
+    await page.goto("/");
+    await page.evaluate(() => {
+      const invoke = window.__TAURI_INTERNALS__.invoke;
+      const gate = new Promise((resolve) => {
+        window.releaseTableCount = resolve;
+      });
+      window.__TAURI_INTERNALS__.invoke = async (command, args) => {
+        const result = await invoke(command, args);
+        if (command === "execute_sql" && args.sql.startsWith("SELECT count(*)"))
+          await gate;
+        return result;
+      };
+    });
+    await page.getByTitle("Open commerce.customers").click();
+    const cancelCount = page.getByRole("button", {
+      name: "Cancel count",
+      exact: true,
+    });
+    await expect(cancelCount).toBeVisible();
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(page.getByRole("gridcell").first()).toHaveText("501");
+    await cancelCount.click();
+    await page.evaluate(() => window.releaseTableCount());
+    await expect(page.locator(".page-range")).toHaveText("501–1,000");
+    const queries = bridge.events.filter(
+      (event) => event.command === "execute_sql",
+    );
+    const counts = queries.filter((event) =>
+      event.sql.startsWith("SELECT count(*)"),
+    );
+    expect(counts).toHaveLength(1);
+    expect(counts[0].sessionId).not.toBe(queries[0].sessionId);
+    await expect
+      .poll(() => bridge.sessions.has(counts[0].sessionId))
+      .toBe(false);
+  } finally {
+    await bridge.close();
+  }
+});

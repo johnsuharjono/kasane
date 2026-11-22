@@ -32,10 +32,12 @@ import {
 export function TableBrowser({
   tab,
   onExecute,
+  onCancelCount,
   onOpenReference,
 }: {
   tab: Tab;
   onExecute: (settings: TableSettings) => void;
+  onCancelCount: () => void;
   onOpenReference: (reference: ColumnReference, value: string) => void;
 }) {
   const settings = tab.tableSettings ?? defaultTableSettings;
@@ -46,9 +48,7 @@ export function TableBrowser({
   }, [settings.filterColumn, settings.filterOperator, settings.filterValue]);
   const execution = tab.executions["table-data"];
   const { autoPreview } = usePreferences();
-  const running = Object.values(tab.executions).some(
-    (e) => e.state === "running",
-  );
+  const running = execution?.state === "running";
   // Controls dim only for slow work; App's busy guard drops clicks meanwhile.
   const busy = useDelayed(running);
   const page = pageFor(settings),
@@ -72,7 +72,7 @@ export function TableBrowser({
           lastCount.current?.source === count.source
         ? lastCount.current.total
         : undefined;
-  const counting = useDelayed(count?.state === "running");
+  const counting = useDelayed(validCount && count?.state === "running");
   const totalPages = total
     ? (BigInt(total) + BigInt(pageSize) - 1n) / BigInt(pageSize)
     : undefined;
@@ -264,6 +264,11 @@ export function TableBrowser({
             "Counting…"
           ) : null}
         </span>
+        {counting && (
+          <Button className="quiet small" onClick={onCancelCount}>
+            Cancel count
+          </Button>
+        )}
       </div>
       {!execution && (tab.restored || !autoPreview) ? (
         <div className="execution-empty">
