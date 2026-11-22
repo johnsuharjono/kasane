@@ -134,6 +134,10 @@ export default function App() {
   const browseSession =
     browser?.connectionId === selected ? browser.sessionId : "";
   const [ready, setReady] = useState(false);
+  const [tableCountResults, setTableCountResults] = useState<
+    Record<string, Execution>
+  >({});
+  const tableCounts = useRef(new Map<string, () => void>());
   const [connecting, setConnecting] = useState(false);
   const [revision, setRevision] = useState(0);
   const [paused, setPaused] = useState<string | null>(null);
@@ -186,7 +190,6 @@ export default function App() {
     Number(localStorage.getItem("kasane.sidebarWidth")) || 252,
   );
   const busy = useRef(new Set<string>());
-  const tableCounts = useRef(new Map<string, () => void>());
   const catalogCache = useRef(new Map<string, Relation[]>());
   const activeConnection = connections.find((c) => c.id === tab?.connectionId);
   const refresh = async () => {
@@ -362,13 +365,9 @@ export default function App() {
     const requestId = uid(),
       source = tableQuery(t.relation, settings);
     const countSource = tableCountQuery(t.relation, settings);
-    const previousCount = t.executions["table-count"];
-    if (
-      refreshCount ||
-      previousCount?.source !== countSource ||
-      previousCount.outdated
-    )
-      stopTableCount(t.id);
+    const previousCount = tableCountResults[t.id];
+    const needsCount = refreshCount || previousCount?.source !== countSource;
+    if (needsCount) stopTableCount(t.id);
     patch(t.id, (t) => ({ ...t, tableSettings: settings }));
     setExecution(t.id, "table-data", { state: "running", requestId, source });
     try {
@@ -387,10 +386,7 @@ export default function App() {
       const current = useWorkspace
         .getState()
         .tabs.find((tab) => tab.id === t.id);
-      if (
-        current?.sessionId === sessionId &&
-        !current.executions["table-count"]
-      )
+      if (needsCount && current?.sessionId === sessionId)
         void countTable(current, countSource);
     } catch (e) {
       const error = asError(e);
@@ -410,11 +406,11 @@ export default function App() {
     const stop = tableCounts.current.get(tabId);
     tableCounts.current.delete(tabId);
     stop?.();
-    patch(tabId, (tab) => {
-      if (!tab.executions["table-count"]) return tab;
-      const executions = { ...tab.executions };
-      delete executions["table-count"];
-      return { ...tab, executions };
+    setTableCountResults((counts) => {
+      if (!counts[tabId]) return counts;
+      const next = { ...counts };
+      delete next[tabId];
+      return next;
     });
   }
   async function countTable(t: Tab, source: string) {
@@ -427,15 +423,17 @@ export default function App() {
       void api.close(sessionId).catch(() => {});
     };
     const isCurrent = () => tableCounts.current.get(t.id) === release;
+    const setCount = (execution: Execution) =>
+      setTableCountResults((counts) => ({ ...counts, [t.id]: execution }));
     tableCounts.current.set(t.id, release);
-    setExecution(t.id, "table-count", { state: "running", requestId, source });
+    setCount({ state: "running", requestId, source });
     try {
       await api.open(t.connectionId!, sessionId);
       opened = true;
       if (!isCurrent()) return;
       const result = await api.execute(sessionId, requestId, source);
       if (isCurrent())
-        setExecution(t.id, "table-count", {
+        setCount({
           state: "success",
           requestId,
           source,
@@ -443,7 +441,7 @@ export default function App() {
         });
     } catch (e) {
       if (isCurrent())
-        setExecution(t.id, "table-count", {
+        setCount({
           state: "failed",
           requestId,
           source,
@@ -508,9 +506,9 @@ export default function App() {
     }
   }
   async function cancel(t: Tab) {
-    const running = Object.entries(t.executions).find(
-      ([id, e]) => id !== "table-count" && e.state === "running",
-    )?.[1];
+    const running = Object.values(t.executions).find(
+      (e) => e.state === "running",
+    );
     if (t.sessionId && running)
       try {
         await api.cancel(t.sessionId, running.requestId);
@@ -610,7 +608,7 @@ export default function App() {
     }
   }
   async function closeTab(t: Tab) {
-    if (busy.current.has(t.id)) {
+    if (Object.values(t.executions).some((e) => e.state === "running")) {
       setNotice("Cancel the running query before closing this tab.");
       return;
     }
@@ -683,10 +681,7 @@ export default function App() {
   }, [selected]);
   const schemas = [...new Set(catalog.map((r) => r.schema))];
   const running =
-    !!tab &&
-    Object.entries(tab.executions).some(
-      ([id, e]) => id !== "table-count" && e.state === "running",
-    );
+    !!tab && Object.values(tab.executions).some((e) => e.state === "running");
   // Busy UI waits a moment so sub-second work (counts, small pages) doesn't flash.
   const showBusy = useDelayed(running);
   const currentCatalog =
@@ -1671,6 +1666,7 @@ export default function App() {
                     key={tab.id}
                     tab={tab}
                     onExecute={(settings) => void runTable(tab, settings)}
+                    count={tableCountResults[tab.id]}
                     onCancelCount={() => stopTableCount(tab.id)}
                     onOpenReference={openReference}
                   />
