@@ -4,17 +4,17 @@ Start and seed the local fixture, install the browser engines, then run the chec
 
 ```sh
 make db-up db-seed
-npx playwright install chromium webkit
+bun run playwright install chromium webkit
 make check
 ```
 
 Run individual checks with:
 
 ```sh
-npm run build
+bun run build
 cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored
-npm test
+bun run test
 ```
 
 ## Coverage

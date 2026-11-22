@@ -1548,7 +1548,7 @@ export default function App() {
             {!native && (
               <div className="desktop-note">
                 Desktop services are unavailable in a browser. Launch with{" "}
-                <code>npm run tauri dev</code> to connect and save notebooks.
+                <code>bun run tauri dev</code> to connect and save notebooks.
               </div>
             )}
             {!tab ? (

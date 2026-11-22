@@ -27,14 +27,14 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "24"
-          cache: npm
+      - uses: oven-sh/setup-bun@v2
       - name: Install tools
         run: |
           rustup toolchain install stable --profile minimal --component clippy
           rustup default stable
           brew list postgresql@18 >/dev/null 2>&1 || brew install postgresql@18
-          npm ci
-          npx playwright install chromium webkit
+          make setup
+          bun run playwright install chromium webkit
       - name: Seed PostgreSQL and run checks
         env:
           KASANE_MULTI_TEST: "1"

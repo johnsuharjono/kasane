@@ -2,7 +2,7 @@
 
 ## Dependency decisions
 
-Node and Cargo lockfiles pin dependencies.
+Bun and Cargo lockfiles pin dependencies.
 
 - Tauri 2, React 19, TypeScript 7, Vite 8. The frontend contains no database driver and no persisted password.
 - shadcn/ui Base UI variant (base-nova registry), Tailwind 4 with its Vite plugin, and semantic CSS-variable tokens in `src/theme.css`. Registry components cover buttons, inputs, textarea, select, checkbox, dialog, context menu, dropdown menu, tabs, tooltip, and resizable panels. Layouts and the data grid remain app-specific. App layout CSS lives in the components layer so Tailwind utilities can override it. Settings → Appearance provides persisted System/Light/Dark choices. System mode listens for OS preference changes; the root class, CSS color scheme, CodeMirror theme, and native window appearance follow it. Cmd+, and the Kasane application menu open Settings. See `THIRD_PARTY_NOTICES.md` for registry source/license provenance.

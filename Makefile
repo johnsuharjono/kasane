@@ -2,7 +2,7 @@
 COMPOSE := docker compose -f dev/db/compose.yaml
 .PHONY: help setup db-up db-down db-seed db-verify db-reset db-destroy db-shell
 help:
-	@echo 'setup       Install pinned Node dependencies'
+	@echo 'setup       Install pinned dependencies with Bun'
 	@echo 'db-up       Start isolated PostgreSQL on localhost:55432'
 	@echo 'db-seed     Recreate fixture schemas and insert deterministic data'
 	@echo 'db-verify   Verify data, types, relationships and indexes'
@@ -18,15 +18,15 @@ help:
 	@echo 'build       Package a macOS development app'
 	@echo 'check       Run frontend, Rust and integration checks'
 setup:
-	npm ci
+	bun install --frozen-lockfile
 db-up:
 	$(COMPOSE) up -d --wait
 db-down:
 	$(COMPOSE) --profile multi down
 db-seed:
-	npm run db:seed
+	bun run db:seed
 db-verify:
-	npm run db:verify
+	bun run db:verify
 db-reset:
 	$(MAKE) db-destroy
 	$(MAKE) db-up
@@ -39,14 +39,14 @@ db-shell:
 
 .PHONY: dev build check
 dev:
-	npm run tauri dev
+	bun run tauri dev
 build:
-	npm run tauri build -- --debug --bundles app
+	bun run tauri build --debug --bundles app
 check:
-	npm run build
+	bun run build
 	cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 	cargo test --manifest-path src-tauri/Cargo.toml -- --include-ignored
-	npm test
+	bun run test
 
 .PHONY: db-multi-up db-seed-analytics db-multi-check
 db-multi-up:
@@ -54,7 +54,7 @@ db-multi-up:
 db-seed-analytics:
 	node dev/db/seed-analytics.mjs
 db-multi-check:
-	KASANE_MULTI_TEST=1 npx playwright test tests/multi-connection.spec.mjs
+	KASANE_MULTI_TEST=1 bun run playwright test tests/multi-connection.spec.mjs
 
 .PHONY: db-multi-reset
 db-multi-reset:

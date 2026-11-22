@@ -2,7 +2,7 @@
 
 Disposable, synthetic PostgreSQL data for browsing, notebooks, types, and grid benchmarks. Uses Docker Compose project **kasane-dev**, its own named volume, and **127.0.0.1:55432**.
 
-From the repository root, with Node 24+ and Docker running:
+From the repository root, with Bun, Node 24+, and Docker running:
 
 ```sh
 make setup
