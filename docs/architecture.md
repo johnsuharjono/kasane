@@ -24,7 +24,7 @@ The user can cancel the active request via its request ID and PostgreSQL cancell
 
 A compact sidebar switcher chooses one connection workspace. Each connection may carry a color from a fixed eight-swatch palette (`color` in connections.json, validated in Rust); it tints the switcher mark and has no semantic meaning. Selection automatically opens a dedicated explorer session and loads its catalog; switching closes that explorer session. An effect owns the asynchronous open/catalog lifecycle and disposes late responses, so an earlier selection cannot replace the current catalog. Explicit disconnect also closes that workspace's document sessions and marks results outdated. A failed connection offers explicit retry rather than looping.
 
-Tabs, saved-document libraries, active-tab selection, table filters, and explorer search/collapse state are scoped to the connection. Switching leaves independent document sessions and results live, including running queries. Documents inherit the workspace connection and are never silently retargeted. Restart restoration retains sources and layout, removes all execution/session state, and marks restored table tabs passive until Refresh. Schema metadata loading never replays user SQL.
+Tabs, saved-document libraries, active-tab selection, table filters, and explorer search/collapse state are scoped to the connection. Switching leaves independent document sessions and results live, including running queries. Documents inherit the workspace connection and are never silently retargeted. Restart restoration retains sources and layout. When automatic preview is enabled, a restored table's Data view fetches its saved page without an exact count the first time it becomes visible. SQL and notebook execution requires user action.
 
 ## Catalog extras
 
@@ -70,6 +70,6 @@ Notebook inputs and outputs render as separate areas associated with stable cell
 
 Notebook keyboard handling follows Jupyter's command/edit model: Esc selects a cell, Enter edits it, A/B insert above/below, D D deletes, Z restores, M/Y switch Markdown/SQL, and arrows or J/K select neighbors. Shift+Enter runs and advances, Ctrl+Enter runs in place, and Alt+Enter runs and inserts below. H or ? opens the shortcut dialog, also available from the app's help button. Cell prompts, outputs, and controls support command shortcuts; active text editors keep ordinary typing. SQL completion tooltips mount outside the bounded editor under document.body to avoid clipping.
 
-Preferences persist locally: automatic preview applies to newly opened tables; font size and line wrapping apply live to SQL editors. Notebook result viewports grow with row count up to 360px; standalone SQL and table grids fill their resizable workspace.
+Preferences persist locally: automatic preview applies to new and restored table views; font size and line wrapping apply live to SQL editors. Notebook result viewports grow with row count up to 360px; standalone SQL and table grids fill their resizable workspace.
 
 The color tokens use an ink-blue dark palette inspired by the [official Poimandres palette](https://github.com/drcmda/poimandres-theme/blob/main/src/theme.js) and a custom cool-white light counterpart. UI chrome uses blue accents, while mint/pink are reserved for syntax and semantic states.

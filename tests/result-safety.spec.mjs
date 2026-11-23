@@ -27,6 +27,59 @@ async function setup(page, source) {
     .click();
   return bridge;
 }
+test("double-click fits a column to loaded rows beyond the viewport", async ({
+  page,
+}) => {
+  const bridge = await setup(
+    page,
+    `SELECT CASE WHEN i = 100 THEN repeat('wide ', 14) || 'end' ELSE 'short' END AS payload,
+            i AS id
+     FROM generate_series(1, 100) AS i ORDER BY i;`,
+  );
+  try {
+    await page.locator(".cm-content").press("Meta+Enter");
+    const header = page
+      .getByRole("columnheader")
+      .filter({ hasText: "payload" });
+    const handle = page.getByRole("separator", { name: "Resize payload" });
+    const width = () =>
+      header.evaluate((el) => el.getBoundingClientRect().width);
+    await expect(header).toBeVisible();
+    await expect(page.getByRole("row", { name: /wide wide/ })).toHaveCount(0);
+    const initialWidth = await width();
+    await handle.dblclick();
+    await expect.poll(width).toBeGreaterThan(initialWidth);
+
+    const position = await handle.boundingBox();
+    const x = position.x + position.width / 2;
+    const y = position.y + position.height / 2;
+    const fittedWidth = await width();
+    await page.mouse.move(x, y);
+    await page.mouse.down();
+    await page.mouse.move(x - 50, y);
+    await page.mouse.up();
+    await expect.poll(width).toBe(fittedWidth - 50);
+    await handle.dblclick();
+    await expect.poll(width).toBe(fittedWidth);
+
+    await page.getByRole("separator", { name: "Resize id" }).dblclick();
+    const idHeader = page.getByRole("columnheader").filter({ hasText: /^id/ });
+    await expect(idHeader).toHaveCSS("width", "80px");
+    await expect.poll(width).toBe(fittedWidth);
+
+    await page.getByRole("grid").evaluate((grid) => {
+      grid.scrollTop = grid.scrollHeight;
+    });
+    const widestCell = page.getByRole("gridcell", { name: /wide wide/ });
+    await expect(widestCell).toBeVisible();
+    expect(await widestCell.evaluate((cell) => cell.scrollWidth)).toBe(
+      fittedWidth - 1, // The cell's right border is outside its scroll width.
+    );
+  } finally {
+    await bridge.close();
+  }
+});
+
 test("JSON previews and inspection preserve large integers and decimals", async ({
   page,
 }) => {

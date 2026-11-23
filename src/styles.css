@@ -708,6 +708,21 @@
   .resize-handle:hover {
     background: color-mix(in srgb, var(--foreground) 40%, transparent);
   }
+  .grid-size-probe {
+    position: absolute;
+    inset: 0 auto auto 0;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    visibility: hidden;
+  }
+  .grid-size-content {
+    display: grid;
+    width: max-content;
+  }
+  .grid-size-content > :is(.column-header, .grid-cell) {
+    position: static;
+  }
   .grid-canvas {
     position: relative;
   }

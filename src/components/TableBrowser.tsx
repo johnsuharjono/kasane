@@ -8,6 +8,7 @@ import {
   ChevronsLeft,
   Columns3,
   Filter,
+  LoaderCircle,
   Lock,
   X,
 } from "lucide-react";
@@ -31,12 +32,18 @@ import {
 } from "./ui/dropdown-menu";
 export function TableBrowser({
   tab,
+  connected,
+  connecting,
+  onPreview,
   onExecute,
   count,
   onCancelCount,
   onOpenReference,
 }: {
   tab: Tab;
+  connected: boolean;
+  connecting: boolean;
+  onPreview: (settings: TableSettings) => void;
   onExecute: (settings: TableSettings) => void;
   count?: Execution;
   onCancelCount: () => void;
@@ -51,6 +58,8 @@ export function TableBrowser({
   const execution = tab.executions["table-data"];
   const { autoPreview } = usePreferences();
   const running = execution?.state === "running";
+  const canPreview = !execution && !tab.disconnected && autoPreview;
+  const loading = running || (canPreview && (connected || connecting));
   // Controls dim only for slow work; App's busy guard drops clicks meanwhile.
   const busy = useDelayed(running);
   const page = pageFor(settings),
@@ -69,9 +78,8 @@ export function TableBrowser({
   const fetched =
     execution?.state === "success" ? (execution.result?.rows.length ?? 0) : 0;
   useEffect(() => {
-    if (!execution && !tab.disconnected && !tab.restored && autoPreview)
-      onExecute(settings);
-  }, [tab.id]);
+    if (connected && canPreview) onPreview(settings);
+  }, [tab.id, connected, canPreview]);
   function sort(column: string) {
     if (running) return;
     const next = {
@@ -260,9 +268,14 @@ export function TableBrowser({
           </Button>
         )}
       </div>
-      {!execution && (tab.restored || !autoPreview) ? (
+      {loading ? (
+        <div className="execution-empty" role="status">
+          <LoaderCircle size={16} className="animate-spin" aria-hidden="true" />
+          <span>Loading rows…</span>
+        </div>
+      ) : !execution ? (
         <div className="execution-empty">
-          <span>{tab.restored ? "Table restored." : "Table ready."}</span>
+          <span>Table ready.</span>
           <small>Refresh to load current data.</small>
         </div>
       ) : (
@@ -287,12 +300,14 @@ export function TableBrowser({
         </span>
         <span className="spacer" />
         <span className="page-range" aria-live="polite">
-          {fetched
-            ? `${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + fetched).toLocaleString()}`
-            : "0 rows"}
-          {total !== undefined &&
-            total !== null &&
-            ` of ${BigInt(total).toLocaleString()} rows`}
+          {execution?.state === "success" && (
+            <>
+              {fetched
+                ? `${(page * pageSize + 1).toLocaleString()}–${(page * pageSize + fetched).toLocaleString()}`
+                : "0 rows"}
+              {total != null && ` of ${BigInt(total).toLocaleString()} rows`}
+            </>
+          )}
         </span>
         <Button
           className="quiet icon"

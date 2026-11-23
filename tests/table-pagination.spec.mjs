@@ -3,6 +3,80 @@ import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import { installDatabaseBridge } from "./helpers/database-bridge.mjs";
 
+test("restored table tabs load one fresh page when opened", async ({
+  page,
+}) => {
+  let resumeCatalog;
+  const bridge = await installDatabaseBridge(page, {
+    afterCatalog: async () => {
+      if (resumeCatalog) await resumeCatalog.promise;
+    },
+  });
+  bridge.connections.push({
+    id: randomUUID(),
+    name: "Development",
+    database: "kasane_dev",
+    host: "127.0.0.1",
+    port: 55432,
+    username: "kasane",
+    tls: false,
+  });
+  const queries = () =>
+    bridge.events.filter((event) => event.command === "execute_sql");
+  const grid = page.getByRole("grid");
+  const tabs = page.getByRole("navigation", { name: "Open documents" });
+  try {
+    await page.goto("/");
+    await page.getByTitle("Open commerce.customers").click();
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 1,000 rows");
+    await page.getByRole("button", { name: "Next page", exact: true }).click();
+    await expect(grid.getByRole("gridcell").first()).toHaveText("501");
+    await page.getByTitle("Open commerce.orders").click();
+    await expect(page.locator(".page-range")).toHaveText("1–500 of 8,000 rows");
+
+    const before = queries().length;
+    resumeCatalog = Promise.withResolvers();
+    await page.reload();
+    await expect(page.getByText("Loading rows…")).toBeVisible();
+    await expect(page.locator(".page-range")).toBeEmpty();
+    expect(queries()).toHaveLength(before);
+    resumeCatalog.resolve();
+    await expect(grid).toBeVisible();
+    expect(
+      queries()
+        .slice(before)
+        .map((event) => event.sql),
+    ).toEqual([expect.stringContaining('FROM "commerce"."orders"')]);
+
+    await tabs.getByRole("button", { name: "customers", exact: true }).click();
+    await expect(grid.getByRole("gridcell").first()).toHaveText("501");
+    expect(
+      queries()
+        .slice(before + 1)
+        .map((event) => event.sql),
+    ).toEqual([expect.stringContaining('FROM "commerce"."customers"')]);
+    await tabs.getByRole("button", { name: "orders", exact: true }).click();
+    await expect(grid).toBeVisible();
+    expect(queries()).toHaveLength(before + 2);
+
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page
+      .getByRole("checkbox", { name: /Load table data on open/ })
+      .click();
+    await page.keyboard.press("Escape");
+    await page.reload();
+    await expect(page.getByText("Table ready.", { exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Switch connection" }),
+    ).toContainText("Connected");
+    await expect(page.locator(".page-range")).toBeEmpty();
+    expect(queries()).toHaveLength(before + 2);
+  } finally {
+    resumeCatalog?.resolve();
+    await bridge.close();
+  }
+});
+
 test("table pages, filtered counts, preferences and content-sized notebook results", async ({
   page,
   browserName,

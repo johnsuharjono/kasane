@@ -30,11 +30,60 @@ import { asError } from "../types";
 const features = tableFeatures({ columnSizingFeature });
 // Two-line header: column name above its type.
 const HEADER_HEIGHT = 46;
+const MIN_COLUMN_WIDTH = 80;
+const MAX_COLUMN_WIDTH = 800;
+const clampColumnWidth = (width: number) =>
+  Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width));
 type Point = { row: number; col: number };
 const isNumber = (c: Column) => /int|numeric|float/.test(c.dataType);
 const isChip = (c: Column) => c.isEnum || c.dataType === "bool";
 const display = (c: Column, v: string) =>
   c.dataType === "bool" ? (v === "t" ? "true" : v === "f" ? "false" : v) : v;
+function cellPreview(column: Column, value: string | null) {
+  if (value === null) return { text: "NULL", className: "value-chip null" };
+  if (value === "") return { text: "empty", className: "empty-value" };
+  if (isChip(column))
+    return { text: display(column, value), className: "value-chip" };
+  return { text: value.length > 160 ? `${value.slice(0, 160)}…` : value };
+}
+
+function measureColumnWidth(
+  header: HTMLElement,
+  column: Column,
+  rows: Result["rows"],
+  index: number,
+) {
+  // Match the grid's rendering, including rows outside the virtual viewport.
+  const probe = document.createElement("div");
+  probe.className = "grid-size-probe";
+  probe.setAttribute("aria-hidden", "true");
+  const content = document.createElement("div");
+  content.className = "grid-size-content";
+  const headerCopy = header.cloneNode(true) as HTMLElement;
+  headerCopy.removeAttribute("style");
+  headerCopy.querySelector(".resize-handle")?.remove();
+  content.append(headerCopy);
+  for (const row of rows) {
+    const value = row[index];
+    const preview = cellPreview(column, value);
+    const cell = document.createElement("div");
+    cell.className = `grid-cell${value === null ? " null-value" : ""}${isNumber(column) ? " number-value" : ""}`;
+    if (preview.className) {
+      const label = document.createElement("span");
+      label.className = preview.className;
+      label.textContent = preview.text;
+      cell.append(label);
+    } else {
+      cell.textContent = preview.text;
+    }
+    content.append(cell);
+  }
+  probe.append(content);
+  header.closest(".data-grid")?.append(probe);
+  const width = Math.ceil(content.getBoundingClientRect().width);
+  probe.remove();
+  return clampColumnWidth(width);
+}
 // Untyped literals coerce to the target column type in INSERT … VALUES.
 const sqlLiteral = (v: string | null) =>
   v === null ? "NULL" : `'${v.replaceAll("'", "''")}'`;
@@ -89,8 +138,8 @@ export const ResultsGrid = memo(function ResultsGrid({
         accessorFn: (row: (string | null)[]) => row[i],
         header: c.name,
         size: isNumber(c) ? 140 : isChip(c) ? 150 : 210,
-        minSize: 80,
-        maxSize: 800,
+        minSize: MIN_COLUMN_WIDTH,
+        maxSize: MAX_COLUMN_WIDTH,
       })),
     [result.columns],
   );
@@ -405,7 +454,21 @@ export const ResultsGrid = memo(function ResultsGrid({
                   role="separator"
                   aria-label={`Resize ${result.columns[v.index].name}`}
                   aria-orientation="vertical"
-                  onDoubleClick={() => leaf[v.index].resetSize()}
+                  title="Double-click to fit column"
+                  onDoubleClick={(e) => {
+                    const header = e.currentTarget.parentElement;
+                    if (!header) return;
+                    const size = measureColumnWidth(
+                      header,
+                      result.columns[v.index],
+                      result.rows,
+                      v.index,
+                    );
+                    table.setColumnSizing((old) => ({
+                      ...old,
+                      [String(v.index)]: size,
+                    }));
+                  }}
                   onPointerDown={(e) => {
                     e.preventDefault();
                     e.stopPropagation();
@@ -419,9 +482,8 @@ export const ResultsGrid = memo(function ResultsGrid({
                       (event) =>
                         table.setColumnSizing((old) => ({
                           ...old,
-                          [String(v.index)]: Math.min(
-                            800,
-                            Math.max(80, size + event.clientX - x),
+                          [String(v.index)]: clampColumnWidth(
+                            size + event.clientX - x,
                           ),
                         })),
                       { signal: controller.signal },
@@ -457,6 +519,7 @@ export const ResultsGrid = memo(function ResultsGrid({
                 {horizontal.getVirtualItems().map((c) => {
                   const value = result.rows[v.index][c.index],
                     column = result.columns[c.index],
+                    preview = cellPreview(column, value),
                     selected =
                       v.index >= minRow &&
                       v.index <= maxRow &&
@@ -486,18 +549,12 @@ export const ResultsGrid = memo(function ResultsGrid({
                       }}
                       onDoubleClick={() => setInspect(true)}
                     >
-                      {value === null ? (
-                        <span className="value-chip null">NULL</span>
-                      ) : value === "" ? (
-                        <span className="empty-value">empty</span>
-                      ) : isChip(column) ? (
-                        <span className="value-chip">
-                          {display(column, value)}
+                      {preview.className ? (
+                        <span className={preview.className}>
+                          {preview.text}
                         </span>
-                      ) : value.length > 160 ? (
-                        `${value.slice(0, 160)}…`
                       ) : (
-                        value
+                        preview.text
                       )}
                     </div>
                   );

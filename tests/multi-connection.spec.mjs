@@ -260,18 +260,24 @@ test("switch database browsers without retargeting saved SQL or notebooks", asyn
       .getByRole("navigation")
       .getByRole("button", { name: "orders", exact: true })
       .click();
-    await expect(
-      page.getByText("Table restored.", { exact: true }),
-    ).toBeVisible();
-    expect(executions().length).toBe(before);
+    await expect(page.getByRole("grid")).toBeVisible();
+    expect(
+      executions()
+        .slice(before)
+        .map((event) => event.sql),
+    ).toEqual([expect.stringContaining('FROM "commerce"."orders"')]);
     await selectAndConnect("Analytics sandbox");
     await expect(
       page
         .getByRole("navigation")
         .getByRole("button", { name: "deployments", exact: true }),
     ).toBeVisible();
-    await expect(page.getByRole("grid")).toHaveCount(0);
-    expect(executions().length).toBe(before);
+    await expect(page.getByRole("grid")).toBeVisible();
+    expect(
+      executions()
+        .slice(before + 1)
+        .map((event) => event.sql),
+    ).toEqual([expect.stringContaining('FROM "workspace"."deployments"')]);
     expect(errors).toEqual([]);
   } finally {
     await bridge.close();
