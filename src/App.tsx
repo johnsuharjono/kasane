@@ -380,7 +380,7 @@ export default function App() {
   async function runTable(
     t: Tab,
     settings: TableSettings,
-    refreshCount = false,
+    countMode: "auto" | "refresh" | "skip" = "auto",
   ) {
     if (!t.relation || busy.current.has(t.id)) return;
     busy.current.add(t.id);
@@ -388,7 +388,9 @@ export default function App() {
       source = tableQuery(t.relation, settings);
     const countSource = tableCountQuery(t.relation, settings);
     const previousCount = tableCountResults[t.id];
-    const needsCount = refreshCount || previousCount?.source !== countSource;
+    const needsCount =
+      countMode === "refresh" ||
+      (countMode === "auto" && previousCount?.source !== countSource);
     if (needsCount) stopTableCount(t.id);
     patch(t.id, (t) => ({ ...t, tableSettings: settings }));
     setExecution(t.id, "table-data", { state: "running", requestId, source });
@@ -1028,7 +1030,7 @@ export default function App() {
     }));
   }
   function refreshTable(t: Tab) {
-    void runTable(t, t.tableSettings ?? defaultTableSettings, true);
+    void runTable(t, t.tableSettings ?? defaultTableSettings, "refresh");
   }
   // Tabs scroll horizontally; those outside the strip are listed in a "+N" menu.
   useLayoutEffect(() => {
@@ -1665,6 +1667,15 @@ export default function App() {
                   <TableBrowser
                     key={tab.id}
                     tab={tab}
+                    connected={!!browseSession}
+                    connecting={!ready || connecting}
+                    onPreview={(settings) =>
+                      void runTable(
+                        tab,
+                        settings,
+                        tab.restored ? "skip" : "auto",
+                      )
+                    }
                     onExecute={(settings) => void runTable(tab, settings)}
                     count={tableCountResults[tab.id]}
                     onCancelCount={() => stopTableCount(tab.id)}
