@@ -1,0 +1,90 @@
+@reference "../theme.css";
+
+.schema-diagram {
+  @apply flex min-h-0 flex-1 flex-col;
+  font-family: "Helvetica Neue", Helvetica, sans-serif;
+  --diagram-surface: #fff;
+  --diagram-canvas: #f7f7f8;
+  --diagram-grid: #e6e6ea;
+  --diagram-rule: #d5d5dc;
+  --diagram-ink: #24252b;
+  --diagram-muted: #555862;
+  --diagram-accent: #002fa7;
+  --diagram-link: #777b8a;
+}
+.dark .schema-diagram {
+  --diagram-surface: #212227;
+  --diagram-canvas: #1a1b1f;
+  --diagram-grid: #2c2d34;
+  --diagram-rule: #464851;
+  --diagram-ink: #f7f7f8;
+  --diagram-muted: #babcc7;
+  --diagram-accent: #9ab3ff;
+  --diagram-link: #929aaa;
+}
+.diagram-toolbar {
+  @apply flex flex-wrap items-center gap-[8px] border-b border-border px-[12px] py-[8px];
+}
+.diagram-search {
+  @apply flex items-center gap-[6px] rounded-[5px] border border-border px-[8px] text-muted-foreground focus-within:border-(--diagram-accent);
+}
+.diagram-table {
+  @apply w-full rounded-[3px] bg-(--diagram-surface) text-[12px] text-(--diagram-ink) outline outline-(--diagram-rule);
+}
+.diagram-external {
+  @apply outline-dashed;
+}
+.diagram-match .diagram-table,
+.react-flow__node.selected .diagram-table {
+  @apply outline-2 outline-(--diagram-accent);
+}
+.diagram-table header {
+  @apply flex h-[42px] cursor-pointer items-center gap-[9px] border-b border-(--diagram-rule) px-[10px];
+}
+.diagram-table header strong,
+.diagram-table header small,
+.diagram-column code,
+.diagram-column-type {
+  @apply block truncate;
+}
+.diagram-table header small,
+.diagram-column-type {
+  @apply text-[10px] text-(--diagram-muted);
+}
+.diagram-column {
+  @apply relative grid h-[25px] grid-cols-[27px_minmax(0,1fr)_minmax(0,auto)] items-center gap-[6px] border-b border-(--diagram-rule) px-[10px];
+}
+.diagram-column.diagram-no-keys {
+  @apply flex text-(--diagram-muted);
+}
+.diagram-column code {
+  @apply text-[11px];
+  font-family: var(--mono);
+}
+.diagram-key {
+  @apply flex items-center gap-[2px] text-[9px] font-bold text-(--diagram-accent);
+}
+.diagram-table footer {
+  @apply flex h-[34px] items-center gap-[6px] px-[6px];
+}
+.diagram-table footer button {
+  @apply rounded-[2px] px-[5px] py-[3px] text-[11px] text-(--diagram-accent) hover:bg-(--diagram-canvas) focus-visible:bg-(--diagram-canvas);
+}
+.diagram-table .react-flow__handle {
+  @apply pointer-events-none size-[5px] border-0 bg-(--diagram-link);
+}
+.diagram-canvas .react-flow__edge-path {
+  stroke: var(--diagram-link);
+  stroke-width: 1.4;
+}
+.diagram-canvas .diagram-edge-active .react-flow__edge-path,
+.diagram-canvas .react-flow__edge:hover .react-flow__edge-path {
+  stroke: var(--diagram-accent);
+  stroke-width: 2;
+}
+.diagram-canvas .react-flow__controls {
+  @apply border border-(--diagram-rule) shadow-none;
+}
+.diagram-canvas .react-flow__controls-button {
+  @apply border-(--diagram-rule) bg-(--diagram-surface) text-(--diagram-ink);
+}

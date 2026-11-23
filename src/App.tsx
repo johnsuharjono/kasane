@@ -37,6 +37,8 @@ import { Textarea } from "./components/ui/textarea";
 import { Tabs, TabsList, TabsTrigger } from "./components/ui/tabs";
 import { QueryPane } from "./components/QueryPane";
 import {
+  lazy,
+  Suspense,
   useEffect,
   useLayoutEffect,
   useRef,
@@ -56,6 +58,7 @@ import {
   BookPlus,
   FilePlus2,
   Moon,
+  Network,
   Sun,
   PanelLeft,
   Code2,
@@ -102,6 +105,13 @@ import {
   type Tab,
   type ColumnReference,
 } from "./types";
+const emptyCatalog: Relation[] = [];
+const SchemaDiagram = lazy(() =>
+  import("./components/SchemaDiagram").then(({ SchemaDiagram }) => ({
+    default: SchemaDiagram,
+  })),
+);
+
 export default function App() {
   const {
     tabs,
@@ -113,6 +123,7 @@ export default function App() {
     add,
     open,
     openSQL,
+    openDiagram,
     activate,
     patch,
     close,
@@ -130,7 +141,8 @@ export default function App() {
     sessionId: string;
     relations: Relation[];
   }>();
-  const catalog = browser?.connectionId === selected ? browser.relations : [];
+  const catalog =
+    browser?.connectionId === selected ? browser.relations : emptyCatalog;
   const browseSession =
     browser?.connectionId === selected ? browser.sessionId : "";
   const [ready, setReady] = useState(false);
@@ -674,7 +686,7 @@ export default function App() {
         e.preventDefault();
         setSettingsOpen(true);
       }
-      if (e.key === "s" && t && !t.relation) {
+      if (e.key === "s" && t && !t.relation && t.kind !== "diagram") {
         e.preventDefault();
         void save(t);
       }
@@ -1158,7 +1170,9 @@ export default function App() {
           ? { label: "Session live", tone: "live" }
           : { label: "No session", tone: "idle" };
   const tabIcon = (t: Tab) =>
-    t.relation ? (
+    t.kind === "diagram" ? (
+      <Network size={14} aria-hidden="true" />
+    ) : t.relation ? (
       <Table2 size={14} aria-hidden="true" />
     ) : t.kind === "query" ? (
       <FileCode2 size={14} aria-hidden="true" />
@@ -1350,94 +1364,133 @@ export default function App() {
                   </div>
                   <div className="schema-tree">
                     {schemas.map((schema) => (
-                      <details
-                        key={`${selected}:${schema}`}
-                        open={!explorerState.collapsed.includes(schema)}
-                        onToggle={(e) => {
-                          const collapsed = explorerState.collapsed.filter(
-                            (s) => s !== schema,
-                          );
-                          if (!e.currentTarget.open) collapsed.push(schema);
-                          if (
-                            collapsed.join("\0") !==
-                            explorerState.collapsed.join("\0")
-                          )
-                            setExplorer(selected, {
-                              ...explorerState,
-                              collapsed,
-                            });
-                        }}
+                      <div
+                        className="relative"
+                        key={JSON.stringify([selected, schema])}
                       >
-                        <summary>
-                          <ChevronRight size={13} />
-                          {schema}
-                          <small>
-                            {catalog.filter((r) => r.schema === schema).length}
-                          </small>
-                        </summary>
-                        <div className="schema-children">
-                          {catalog
-                            .filter(
-                              (r) =>
-                                r.schema === schema &&
-                                `${r.name} ${r.columns.map((c) => c.name).join(" ")}`
-                                  .toLowerCase()
-                                  .includes(query),
+                        <details
+                          open={!explorerState.collapsed.includes(schema)}
+                          onToggle={(e) => {
+                            const collapsed = explorerState.collapsed.filter(
+                              (s) => s !== schema,
+                            );
+                            if (!e.currentTarget.open) collapsed.push(schema);
+                            if (
+                              collapsed.join("\0") !==
+                              explorerState.collapsed.join("\0")
                             )
-                            .map((r) => (
-                              <ContextMenu key={r.name}>
-                                <ContextMenuTrigger
-                                  render={
-                                    <button
-                                      className={`table-entry ${tab?.relation && tab.tableKey === JSON.stringify([selected, r.schema, r.name]) ? "active" : ""}`}
-                                      title={`Open ${schema}.${r.name}`}
-                                      onClick={() => openTable(r)}
-                                    />
-                                  }
-                                >
-                                  {r.kind === "table" ? (
-                                    <Table2 size={14} aria-hidden="true" />
-                                  ) : (
-                                    <Eye size={14} aria-hidden="true" />
-                                  )}
-                                  <span>{r.name}</span>
-                                  {r.kind !== "table" ? (
-                                    <small className="kind-label">
-                                      {r.kind}
-                                    </small>
-                                  ) : (
-                                    r.estimatedRows !== undefined && (
-                                      <small
-                                        className="row-estimate"
-                                        aria-hidden="true"
-                                        title={`About ${r.estimatedRows.toLocaleString()} rows (planner estimate)`}
-                                      >
-                                        {formatEstimate(r.estimatedRows)}
+                              setExplorer(selected, {
+                                ...explorerState,
+                                collapsed,
+                              });
+                          }}
+                        >
+                          <summary className="pr-[33px]">
+                            <ChevronRight size={13} />
+                            {schema}
+                            <small>
+                              {
+                                catalog.filter((r) => r.schema === schema)
+                                  .length
+                              }
+                            </small>
+                          </summary>
+                          <div className="schema-children">
+                            {catalog
+                              .filter(
+                                (r) =>
+                                  r.schema === schema &&
+                                  `${r.name} ${r.columns.map((c) => c.name).join(" ")}`
+                                    .toLowerCase()
+                                    .includes(query),
+                              )
+                              .map((r) => (
+                                <ContextMenu key={r.name}>
+                                  <ContextMenuTrigger
+                                    render={
+                                      <button
+                                        className={`table-entry ${tab?.relation && tab.tableKey === JSON.stringify([selected, r.schema, r.name]) ? "active" : ""}`}
+                                        title={`Open ${schema}.${r.name}`}
+                                        onClick={() => openTable(r)}
+                                      />
+                                    }
+                                  >
+                                    {r.kind === "table" ? (
+                                      <Table2 size={14} aria-hidden="true" />
+                                    ) : (
+                                      <Eye size={14} aria-hidden="true" />
+                                    )}
+                                    <span>{r.name}</span>
+                                    {r.kind !== "table" ? (
+                                      <small className="kind-label">
+                                        {r.kind}
                                       </small>
-                                    )
-                                  )}
-                                </ContextMenuTrigger>
-                                <ContextMenuContent>
-                                  <ContextMenuItem
-                                    onClick={() => openTable(r, "data")}
-                                  >
-                                    Open Data
-                                  </ContextMenuItem>
-                                  <ContextMenuItem
-                                    onClick={() => openTable(r, "query")}
-                                  >
-                                    Open SQL
-                                  </ContextMenuItem>
-                                  <ContextMenuItem
-                                    onClick={() => openTable(r, "structure")}
-                                  >
-                                    View Structure
-                                  </ContextMenuItem>
-                                </ContextMenuContent>
-                              </ContextMenu>
-                            ))}
-                        </div>
-                      </details>
+                                    ) : (
+                                      r.estimatedRows !== undefined && (
+                                        <small
+                                          className="row-estimate"
+                                          aria-hidden="true"
+                                          title={`About ${r.estimatedRows.toLocaleString()} rows (planner estimate)`}
+                                        >
+                                          {formatEstimate(r.estimatedRows)}
+                                        </small>
+                                      )
+                                    )}
+                                  </ContextMenuTrigger>
+                                  <ContextMenuContent>
+                                    <ContextMenuItem
+                                      onClick={() => openTable(r, "data")}
+                                    >
+                                      Open Data
+                                    </ContextMenuItem>
+                                    <ContextMenuItem
+                                      onClick={() => openTable(r, "query")}
+                                    >
+                                      Open SQL
+                                    </ContextMenuItem>
+                                    <ContextMenuItem
+                                      onClick={() => openTable(r, "structure")}
+                                    >
+                                      View Structure
+                                    </ContextMenuItem>
+                                    {r.kind === "table" && (
+                                      <ContextMenuItem
+                                        onClick={() =>
+                                          openDiagram(selected, {
+                                            schema,
+                                            table: r.name,
+                                          })
+                                        }
+                                      >
+                                        Show in Diagram
+                                      </ContextMenuItem>
+                                    )}
+                                  </ContextMenuContent>
+                                </ContextMenu>
+                              ))}
+                          </div>
+                        </details>
+                        <DropdownMenu>
+                          <DropdownMenuTrigger
+                            render={
+                              <Button
+                                className="quiet icon absolute top-0 right-px size-[25px] text-muted-foreground"
+                                aria-label={`Schema actions for ${schema}`}
+                                title="Schema actions"
+                              />
+                            }
+                          >
+                            <Network size={13} aria-hidden="true" />
+                          </DropdownMenuTrigger>
+                          <DropdownMenuContent align="end">
+                            <DropdownMenuItem
+                              onClick={() => openDiagram(selected, { schema })}
+                            >
+                              Open Diagram
+                            </DropdownMenuItem>
+                          </DropdownMenuContent>
+                        </DropdownMenu>
+                      </div>
                     ))}
                     {!browseSession && (
                       <div className="sidebar-hint">
@@ -1584,6 +1637,27 @@ export default function App() {
                   <kbd>⌘ ⇧ T</kbd> new notebook
                 </div>
               </div>
+            ) : tab.diagram ? (
+              <Suspense
+                fallback={
+                  <div className="diagram-status" role="status">
+                    Loading diagram…
+                  </div>
+                }
+              >
+                <SchemaDiagram
+                  key={tab.id}
+                  scope={tab.diagram}
+                  catalog={catalog}
+                  sessionId={browseSession}
+                  connecting={connecting}
+                  onRefresh={connect}
+                  onOpenTable={openTable}
+                  onOpenSchema={() =>
+                    openDiagram(selected, { schema: tab.diagram!.schema })
+                  }
+                />
+              </Suspense>
             ) : tab.relation ? (
               <>
                 <Tabs
@@ -2109,7 +2183,7 @@ export default function App() {
           </span>
         )}
         <span className="spacer" />
-        {tab && !tab.relation && (
+        {tab && !tab.relation && tab.kind !== "diagram" && (
           <span>
             {tab.kind === "notebook" ? "Notebook" : "Query"} session ·{" "}
             {sessionState(tab).label.toLowerCase()}

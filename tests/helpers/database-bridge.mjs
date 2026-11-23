@@ -4,6 +4,10 @@ const relationStructure = await readFile(
   "src-tauri/src/relation_structure.sql",
   "utf8",
 );
+const schemaForeignKeys = await readFile(
+  "src-tauri/src/schema_foreign_keys.sql",
+  "utf8",
+);
 const catalog = (await readFile("src-tauri/src/db.rs", "utf8")).match(
   /pub const CATALOG: &str = "([^"]+)";/,
 )[1];
@@ -113,6 +117,35 @@ export async function installDatabaseBridge(page, { afterCatalog } = {}) {
         sessions.delete(args.sessionId);
       }
       return;
+    }
+    if (command === "get_schema_foreign_keys") {
+      const session = sessions.get(args.sessionId);
+      if (!session) throw new Error("Session missing");
+      const result = await session.client.query({
+        text: schemaForeignKeys,
+        values: [args.schema, args.table],
+        rowMode: "array",
+        types: pg.types,
+      });
+      return result.rows.map(
+        ([
+          name,
+          sourceSchema,
+          sourceTable,
+          targetSchema,
+          targetTable,
+          sourceColumns,
+          targetColumns,
+        ]) => ({
+          name,
+          sourceSchema,
+          sourceTable,
+          sourceColumns,
+          targetSchema,
+          targetTable,
+          targetColumns,
+        }),
+      );
     }
     if (command === "get_relation_structure") {
       const session = sessions.get(args.sessionId);
