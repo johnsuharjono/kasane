@@ -265,6 +265,27 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
       )
       .toBeGreaterThan(oldWidth + 25);
     const editor = page.locator(".cm-content");
+    const beforeStatements = queries.length;
+    const firstStatement = "SELECT 101;";
+    const secondStatement = "SELECT\n  $$second; statement$$;";
+    await replaceEditor(
+      editor,
+      `${firstStatement} -- separator; in comment\n\n${secondStatement}`,
+    );
+    await editor.press("Meta+Enter");
+    await expect(page.getByRole("gridcell").first()).toHaveText(
+      "second; statement",
+    );
+    await expect(page.locator(".outdated-banner")).toHaveCount(0);
+    await editor.locator(".cm-line").nth(1).click();
+    await editor.press("Meta+Enter");
+    await editor.locator(".cm-line").first().click();
+    await page.getByRole("button", { name: "Run query", exact: true }).click();
+    await expect(page.getByRole("gridcell").first()).toHaveText("101");
+    expect(queries.slice(beforeStatements)).toEqual([
+      secondStatement,
+      firstStatement,
+    ]);
     await replaceEditor(editor, "SELECT * FROM commerce.cus");
     await editor.press("Control+Space");
     await expect(page.locator(".cm-tooltip-autocomplete")).toContainText(

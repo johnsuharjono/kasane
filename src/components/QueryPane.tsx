@@ -1,4 +1,4 @@
-import { useRef, type ReactNode } from "react";
+import { useRef, type ReactNode, type Ref } from "react";
 import { SqlEditor } from "./SqlEditor";
 import {
   ResizablePanelGroup,
@@ -10,6 +10,7 @@ export function QueryPane({
   source,
   onChange,
   onRun,
+  runRef,
   catalog,
   height = 240,
   onResize,
@@ -17,7 +18,8 @@ export function QueryPane({
 }: {
   source: string;
   onChange: (v: string) => void;
-  onRun: () => void;
+  onRun: (statement: string) => void;
+  runRef: Ref<() => void>;
   catalog: Relation[];
   height?: number;
   onResize: (height: number) => void;
@@ -50,6 +52,8 @@ export function QueryPane({
             value={source}
             onChange={onChange}
             onRun={onRun}
+            runMode="statement"
+            runRef={runRef}
             catalog={catalog}
           />
         </div>
