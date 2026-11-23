@@ -1,9 +1,7 @@
 {
   "identifier": "default",
   "description": "Main window core operations",
-  "windows": [
-    "main"
-  ],
+  "windows": ["main"],
   "permissions": [
     "core:default",
     "clipboard-manager:allow-write-text",

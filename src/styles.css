@@ -2475,7 +2475,8 @@
     padding-block: 6px;
     overflow-wrap: anywhere;
   }
-  .structure-comment, .structure-label {
+  .structure-comment,
+  .structure-label {
     color: var(--muted-foreground);
     white-space: pre-wrap;
   }
@@ -2490,7 +2491,8 @@
     white-space: pre-wrap;
     overflow-wrap: anywhere;
   }
-  .structure-view code, .structure-view pre {
+  .structure-view code,
+  .structure-view pre {
     font: 12px/1.55 var(--mono);
   }
   .filter-summary {
