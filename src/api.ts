@@ -2,6 +2,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   Connection,
   ConnectionTest,
+  DiagramScope,
+  ForeignKey,
   Notebook,
   Result,
   Relation,
@@ -49,6 +51,12 @@ export const api = {
   notebooks: () => call<Notebook[]>("list_notebooks"),
   saveNotebook: (notebook: Notebook) =>
     call<void>("save_notebook", { notebook }),
+  foreignKeys: (sessionId: string, diagram: DiagramScope) =>
+    call<ForeignKey[]>("get_schema_foreign_keys", {
+      sessionId,
+      schema: diagram.schema,
+      table: diagram.table ?? null,
+    }),
   structure: (sessionId: string, schema: string, relation: string) =>
     call<RelationStructure>("get_relation_structure", {
       sessionId,

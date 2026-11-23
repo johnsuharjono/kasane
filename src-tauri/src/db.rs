@@ -146,6 +146,29 @@ impl Session {
         self.execute_with_limits("catalog", CATALOG, 100_000, 16 * 1024 * 1024)
             .await
     }
+    pub async fn schema_foreign_keys(
+        &self,
+        schema: &str,
+        table: Option<&str>,
+    ) -> Result<Vec<ForeignKey>, DbError> {
+        let client = self.client.lock().await;
+        let rows = client
+            .query(include_str!("schema_foreign_keys.sql"), &[&schema, &table])
+            .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(ForeignKey {
+                    name: row.try_get("name")?,
+                    source_schema: row.try_get("source_schema")?,
+                    source_table: row.try_get("source_table")?,
+                    source_columns: row.try_get("source_columns")?,
+                    target_schema: row.try_get("target_schema")?,
+                    target_table: row.try_get("target_table")?,
+                    target_columns: row.try_get("target_columns")?,
+                })
+            })
+            .collect()
+    }
     pub async fn relation_structure(
         &self,
         schema: &str,
@@ -305,6 +328,18 @@ struct StructureIndex {
     valid: bool,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForeignKey {
+    name: String,
+    source_schema: String,
+    source_table: String,
+    source_columns: Vec<String>,
+    target_schema: String,
+    target_table: String,
+    target_columns: Vec<String>,
+}
+
 pub const CATALOG: &str = "SELECT n.nspname AS schema, c.relname AS name, CASE c.relkind WHEN 'v' THEN 'view' WHEN 'm' THEN 'materialized view' ELSE 'table' END AS kind, a.attname AS column, pg_catalog.format_type(a.atttypid,a.atttypmod) AS type, a.attnotnull::text AS required, (SELECT k.ordinality::text FROM pg_catalog.pg_index i CROSS JOIN LATERAL unnest(i.indkey) WITH ORDINALITY k(attnum, ordinality) WHERE i.indrelid=c.oid AND i.indisprimary AND k.attnum=a.attnum) AS primary_key_position, CASE WHEN c.reltuples >= 0 THEN c.reltuples::bigint::text END AS estimated_rows, fk.sch AS fk_schema, fk.rel AS fk_table, fk.col AS fk_column FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n ON n.oid=c.relnamespace JOIN pg_catalog.pg_attribute a ON a.attrelid=c.oid AND a.attnum>0 AND NOT a.attisdropped LEFT JOIN LATERAL (SELECT tn.nspname AS sch, t.relname AS rel, ta.attname AS col FROM pg_catalog.pg_constraint con JOIN pg_catalog.pg_class t ON t.oid=con.confrelid JOIN pg_catalog.pg_namespace tn ON tn.oid=t.relnamespace JOIN pg_catalog.pg_attribute ta ON ta.attrelid=t.oid AND ta.attnum=con.confkey[1] WHERE con.conrelid=c.oid AND con.contype='f' AND cardinality(con.conkey)=1 AND con.conkey[1]=a.attnum ORDER BY con.conname LIMIT 1) fk ON true WHERE c.relkind IN ('r','v','m','p') AND n.nspname NOT IN ('pg_catalog','information_schema') AND n.nspname NOT LIKE 'pg_toast%' ORDER BY n.nspname,c.relname,a.attnum";
 
 #[cfg(test)]
@@ -371,6 +406,16 @@ mod tests {
         assert!(view.view_definition.is_some());
         assert!(s.relation_structure("lab", "Odd table").await.is_ok());
         assert!(s.relation_structure("lab", "missing").await.is_err());
+        let keys = s
+            .schema_foreign_keys("commerce", Some("order_items"))
+            .await
+            .unwrap();
+        assert!(keys.iter().any(|key| {
+            key.source_table == "order_items"
+                && key.source_columns == ["order_id"]
+                && key.target_table == "orders"
+                && key.target_columns == ["id"]
+        }));
         let catalog = s.catalog().await.unwrap();
         let item_keys: Vec<_> = catalog
             .rows

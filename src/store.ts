@@ -3,6 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import {
   uid,
   type Tab,
+  type DiagramScope,
   type Cell,
   type Execution,
   type Notebook,
@@ -20,10 +21,11 @@ type Workspace = {
     value: { search: string; collapsed: string[] },
   ) => void;
   add: (
-    kind: Tab["kind"],
+    kind: "query" | "notebook",
     connectionId: string | null,
     source?: string,
   ) => void;
+  openDiagram: (connectionId: string, diagram: DiagramScope) => void;
   open: (notebook: Notebook) => void;
   openSQL: (document: SQLDocument) => void;
   activate: (id: string) => void;
@@ -101,6 +103,35 @@ export const useWorkspace = create<Workspace>()(
                         source: source ?? "",
                       },
                     ],
+            },
+          ],
+        }));
+      },
+      openDiagram: (connectionId, diagram) => {
+        const existing = get().tabs.find(
+          (tab) =>
+            tab.connectionId === connectionId &&
+            tab.diagram?.schema === diagram.schema &&
+            tab.diagram.table === diagram.table,
+        );
+        if (existing) {
+          set({ activeId: existing.id });
+          return;
+        }
+        const id = uid();
+        set((s) => ({
+          activeId: id,
+          tabs: [
+            ...s.tabs,
+            {
+              id,
+              kind: "diagram",
+              title: `${diagram.table ?? diagram.schema} · Diagram`,
+              connectionId,
+              diagram,
+              cells: [],
+              executions: {},
+              dirty: false,
             },
           ],
         }));
@@ -216,6 +247,7 @@ export const useWorkspace = create<Workspace>()(
           dirty: t.dirty,
           tableKey: t.tableKey,
           relation: t.relation,
+          diagram: t.diagram,
           view: t.view,
           tableSettings: t.tableSettings,
           filtersOpen: t.filtersOpen,
@@ -229,7 +261,12 @@ export const useWorkspace = create<Workspace>()(
           .filter(
             (t) =>
               typeof t.id === "string" &&
-              (t.kind === "query" || t.kind === "notebook") &&
+              (t.kind === "query" ||
+                t.kind === "notebook" ||
+                (t.kind === "diagram" &&
+                  typeof t.diagram?.schema === "string" &&
+                  (t.diagram.table === undefined ||
+                    typeof t.diagram.table === "string"))) &&
               Array.isArray(t.cells),
           )
           .map((t) => ({

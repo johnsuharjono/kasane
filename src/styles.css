@@ -1,3 +1,5 @@
+@reference "./theme.css";
+
 @layer components {
   :root {
     font-family:
@@ -3123,5 +3125,11 @@
     color: var(--muted-foreground);
     font-family: var(--mono);
     font-size: 11px;
+  }
+}
+
+@layer components {
+  .diagram-status {
+    @apply m-auto p-[24px] text-center text-muted-foreground;
   }
 }

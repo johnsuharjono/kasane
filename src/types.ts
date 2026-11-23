@@ -111,9 +111,20 @@ export type TableSettings = {
   /** Columns left out of the SELECT list. */
   hiddenColumns?: string[];
 };
+export type DiagramScope = { schema: string; table?: string };
+export type ForeignKey = {
+  name: string;
+  sourceSchema: string;
+  sourceTable: string;
+  sourceColumns: string[];
+  targetSchema: string;
+  targetTable: string;
+  targetColumns: string[];
+};
 export type Tab = {
   id: string;
-  kind: "query" | "notebook";
+  kind: "query" | "notebook" | "diagram";
+  diagram?: DiagramScope;
   title: string;
   cells: Cell[];
   connectionId: string | null;
