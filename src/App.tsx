@@ -872,7 +872,8 @@ export default function App() {
     cell: Cell,
     index: number,
   ) {
-    if (e.defaultPrevented || e.nativeEvent.isComposing || !tab) return;
+    // Let the dialog handle Escape even before focus moves off the cell.
+    if (help || e.defaultPrevented || e.nativeEvent.isComposing || !tab) return;
     const target = e.target as HTMLElement;
     // SQL handles Escape itself so it can close completion at the same time.
     if (target.closest(".cm-editor")) return;
