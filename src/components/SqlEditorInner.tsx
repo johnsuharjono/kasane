@@ -3,16 +3,53 @@ import { usePreferences } from "../preferences";
 import { useAppearance } from "../appearance";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
-import { useMemo, useRef } from "react";
+import {
+  useCallback,
+  useImperativeHandle,
+  useMemo,
+  useRef,
+  type Ref,
+} from "react";
 import CodeMirror from "@uiw/react-codemirror";
 import { PostgreSQL, sql } from "@codemirror/lang-sql";
-import { Prec } from "@codemirror/state";
+import { Prec, type EditorState } from "@codemirror/state";
 import { keymap, EditorView, placeholder, tooltips } from "@codemirror/view";
 import type { Relation } from "../types";
+
+function statementAtCursor({ doc, selection }: EditorState) {
+  const cursor = selection.main.head;
+  const line = doc.lineAt(cursor);
+  const tree = PostgreSQL.language.parser.parse(doc.toString());
+  // On indentation or trailing whitespace, use a statement on the same line.
+  let statement;
+  for (let node = tree.topNode.firstChild; node; node = node.nextSibling) {
+    if (node.from > line.to) break;
+    if (
+      node.name !== "Statement" ||
+      node.firstChild?.name === ";" ||
+      node.to < line.from
+    )
+      continue;
+
+    if (node.from <= cursor && cursor < node.to) {
+      statement = node;
+      break;
+    }
+    if (node.from > cursor) {
+      statement ??= node;
+      break;
+    }
+    statement = node;
+  }
+  if (statement) return doc.sliceString(statement.from, statement.to);
+}
+
 export function SqlEditor({
   value,
   onChange,
   onRun,
+  runMode = "document",
+  runRef,
   onCommandMode,
   catalog,
   compact = false,
@@ -20,13 +57,32 @@ export function SqlEditor({
 }: {
   value: string;
   onChange: (value: string) => void;
-  onRun: () => void;
+  onRun: (source: string) => void;
+  runMode?: "document" | "statement";
+  runRef?: Ref<() => void>;
   onCommandMode?: () => void;
   catalog: Relation[];
   compact?: boolean;
   fill?: boolean;
 }) {
   const editorView = useRef<EditorView | null>(null);
+  const run = useCallback(
+    (view: EditorView) => {
+      const source =
+        runMode === "statement"
+          ? statementAtCursor(view.state)
+          : view.state.doc.toString();
+      if (source !== undefined) onRun(source);
+    },
+    [onRun, runMode],
+  );
+  useImperativeHandle(
+    runRef,
+    () => () => {
+      if (editorView.current) run(editorView.current);
+    },
+    [run],
+  );
   const { resolved } = useAppearance();
   const { editorFontSize, lineWrapping } = usePreferences();
   const editorTheme = useMemo(
@@ -88,8 +144,8 @@ export function SqlEditor({
         keymap.of([
           {
             key: "Mod-Enter",
-            run: () => {
-              onRun();
+            run: (view) => {
+              run(view);
               return true;
             },
           },
@@ -124,7 +180,7 @@ export function SqlEditor({
         },
       }),
     ],
-    [schema, onRun, onCommandMode, compact, fill, editorFontSize, lineWrapping],
+    [schema, run, compact, fill, editorFontSize, lineWrapping],
   );
   return (
     <CodeMirror

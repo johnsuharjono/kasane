@@ -169,6 +169,7 @@ export default function App() {
   const [sidebar, setSidebar] = useState(true),
     [help, setHelp] = useState(false);
   const notebookRoot = useRef<HTMLDivElement>(null);
+  const runQueryStatement = useRef<() => void>(null);
   const deleteKey = useRef<{ cellId: string; time: number } | null>(null);
   const deletedCells = useRef<
     { tabId: string; index: number; cell: Cell; execution?: Execution }[]
@@ -479,7 +480,7 @@ export default function App() {
       release();
     }
   }
-  async function runCells(t: Tab, cellIds: string[]) {
+  async function runCells(t: Tab, cellIds: string[], statement?: string) {
     if (busy.current.has(t.id)) return;
     busy.current.add(t.id);
     setNotice("");
@@ -506,7 +507,7 @@ export default function App() {
           const { result } = await executeInDocument(
             current,
             requestId,
-            source,
+            statement ?? source,
           );
           setExecution(t.id, cellId, {
             state: "success",
@@ -994,9 +995,7 @@ export default function App() {
   function runAll(t: Tab) {
     void runCells(
       t,
-      t.kind === "query"
-        ? [t.cells[0].id]
-        : t.cells.filter((c) => c.kind === "sql").map((c) => c.id),
+      t.cells.filter((c) => c.kind === "sql").map((c) => c.id),
     );
   }
   async function reconnect(t: Tab) {
@@ -1763,7 +1762,11 @@ export default function App() {
                     <Button
                       className="primary"
                       disabled={!tab.connectionId}
-                      onClick={() => runAll(tab)}
+                      onClick={() =>
+                        tab.kind === "query"
+                          ? runQueryStatement.current?.()
+                          : runAll(tab)
+                      }
                     >
                       <Play size={12} fill="currentColor" />
                       {tab.kind === "query" ? "Run query" : "Run all"}
@@ -1778,7 +1781,11 @@ export default function App() {
                     key={tab.id}
                     source={tab.cells[0].source}
                     onChange={(v) => editCell(tab.id, tab.cells[0].id, v)}
-                    onRun={() => runCells(tab, [tab.cells[0].id])}
+                    runRef={runQueryStatement}
+                    onRun={(statement) => {
+                      if (tab.connectionId)
+                        void runCells(tab, [tab.cells[0].id], statement);
+                    }}
                     catalog={currentCatalog}
                     height={tab.editorHeight}
                     onResize={(editorHeight) =>
