@@ -216,13 +216,15 @@ test("Jupyter commands work from cell prompts and outputs, preserve other result
     await expect(help).toBeVisible();
     await expect(help).toContainText("A and B do not require Shift");
     await expect(help).toContainText("Undo cell deletion");
-    await page.keyboard.press("Escape");
+    // Escape can reach the notebook before the dialog takes focus.
+    await original.dispatchEvent("keydown", { key: "Escape" });
     await expect(help).toHaveCount(0);
     await page
       .getByRole("button", { name: "Keyboard shortcuts", exact: true })
       .click();
     await expect(help).toBeVisible();
     await page.keyboard.press("Escape");
+    await expect(help).toHaveCount(0);
     const countBeforeAlt = await cells.count();
     const originalIndex = await original.evaluate((el) =>
       [...el.parentElement.children].indexOf(el),

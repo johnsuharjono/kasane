@@ -435,6 +435,10 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     await page.screenshot({
       path: `test-results/${browserName}-dark-grid.png`,
     });
+    // A restored active table tab loads a fresh page on reload.
+    await page
+      .getByRole("button", { name: "Close customers", exact: true })
+      .click();
     await page.reload();
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page
