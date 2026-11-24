@@ -27,3 +27,7 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
 Other open-source packages are installed dependencies with their own licenses in their distributions. Application source from rsql, tabularis, and dbcooper has not been copied into Kasane.
+
+## Fonts
+
+Kasane bundles IBM Plex Sans and Commit Mono under the SIL Open Font License 1.1. The frontend build includes their copyright notices and license texts under `licenses/`. [IBM Plex license](https://github.com/IBM/plex/blob/master/LICENSE.txt), [Commit Mono license](https://github.com/eigilnikolajsen/commit-mono/blob/main/LICENSE-FONT).

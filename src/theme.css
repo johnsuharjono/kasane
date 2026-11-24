@@ -2,6 +2,8 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 @theme inline {
+  --font-sans: var(--app-sans);
+  --font-mono: var(--mono);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -34,6 +36,12 @@
   --radius-xl: calc(var(--radius) + 4px);
 }
 :root {
+  --app-sans:
+    "IBM Plex Sans Variable", -apple-system, BlinkMacSystemFont, sans-serif;
+  --mono: "Commit Mono", "SF Mono", Menlo, monospace;
+}
+:root,
+.palette-sample {
   --background: #fbfcfe;
   --foreground: #30364b;
   --card: #ffffff;
@@ -81,7 +89,8 @@
   --warning-foreground: #805c17;
   --success: #277a6a;
 }
-.dark {
+.dark,
+.palette-sample--dark {
   --background: #1b1e28;
   --foreground: #e4f0fb;
   --card: #202431;
@@ -134,4 +143,85 @@
   --chip: #2a3040;
   --chip-foreground: #c5d5ef;
   --chrome: #181b24;
+}
+
+/* Each palette has a light and dark variant. The same tokens render its preview. */
+[data-palette="moss"] {
+  --background: #f5f8f3;
+  --foreground: #24382e;
+  --primary: #286044;
+  --muted-foreground: #53695d;
+  --syntax-string: #356f51;
+}
+[data-palette="moss"]:is(.dark, .palette-sample--dark) {
+  --background: #18231e;
+  --foreground: #e3efe6;
+  --primary: #a5d5af;
+  --muted-foreground: #a1b9aa;
+  --syntax-string: #b5d98e;
+}
+[data-palette="dusk"] {
+  --background: #faf6fb;
+  --foreground: #3d2d49;
+  --primary: #734c8d;
+  --muted-foreground: #71617d;
+  --syntax-string: #24716a;
+}
+[data-palette="dusk"]:is(.dark, .palette-sample--dark) {
+  --background: #251e2e;
+  --foreground: #f0e6f5;
+  --primary: #dbb5ee;
+  --muted-foreground: #c0aecb;
+  --syntax-string: #a7d8cc;
+}
+[data-palette="mono"] {
+  --background: #fff;
+  --foreground: #171717;
+  --primary: #242424;
+  --muted-foreground: #606060;
+}
+[data-palette="mono"]:is(.dark, .palette-sample--dark) {
+  --background: #000;
+  --foreground: #f5f5f5;
+  --primary: #f5f5f5;
+  --muted-foreground: #a3a3a3;
+}
+:is([data-palette="moss"], [data-palette="dusk"], [data-palette="mono"]) {
+  --card: color-mix(in srgb, var(--background) 65%, white);
+  --popover: var(--card);
+  --muted: color-mix(in srgb, var(--background) 93%, var(--primary));
+  --secondary: color-mix(in srgb, var(--background) 88%, var(--primary));
+  --secondary-foreground: var(--foreground);
+  --accent: color-mix(in srgb, var(--background) 82%, var(--primary));
+  --accent-foreground: var(--foreground);
+  --border: color-mix(in srgb, var(--background) 84%, var(--primary));
+  --input: color-mix(in srgb, var(--background) 68%, var(--primary));
+  --ring: var(--primary);
+  --sidebar: var(--muted);
+  --sidebar-foreground: var(--muted-foreground);
+  --sidebar-accent: var(--secondary);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--border);
+  --chip: var(--secondary);
+  --chip-foreground: var(--foreground);
+  --chrome: var(--sidebar);
+  --syntax-keyword: var(--primary);
+}
+:is([data-palette="moss"], [data-palette="dusk"], [data-palette="mono"]):is(
+  .dark,
+  .palette-sample--dark
+) {
+  --card: var(--muted);
+  --popover: var(--secondary);
+  --primary-foreground: var(--background);
+}
+[data-palette="mono"] {
+  --ring: #3e6c9f;
+  --success: var(--ring);
+  --syntax-keyword: var(--ring);
+  --syntax-comment: var(--muted-foreground);
+}
+[data-palette="mono"]:is(.dark, .palette-sample--dark) {
+  --sidebar: #0d0d0d;
+  --ring: #a0c6ef;
 }

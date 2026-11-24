@@ -2,17 +2,12 @@
 
 @layer components {
   :root {
-    font-family:
-      "DM Sans Variable",
-      -apple-system,
-      BlinkMacSystemFont,
-      sans-serif;
+    font-family: var(--app-sans);
     color: var(--foreground);
     background: var(--background);
     font-synthesis: none;
     font-size: 13px;
     --line: var(--border);
-    --mono: "SF Mono", Menlo, monospace;
   }
   * {
     box-sizing: border-box;
@@ -467,11 +462,7 @@
     align-items: center;
     padding: 30px;
     text-align: center;
-    background: radial-gradient(
-      ellipse at 50% 35%,
-      color-mix(in srgb, var(--foreground) 27%, transparent),
-      transparent 65%
-    );
+    background: var(--background);
   }
   .welcome-mark {
     display: flex;
@@ -482,7 +473,6 @@
     margin-bottom: 31px;
   }
   .welcome-mark span {
-    font-family: serif;
     font-size: 12px;
     letter-spacing: 5px;
     margin-left: 5px;
@@ -494,9 +484,8 @@
     color: var(--muted-foreground);
   }
   .welcome h1 {
-    font-family: "Newsreader Variable", Georgia, serif;
-    font-weight: 400;
-    font-size: 58px;
+    font-weight: 600;
+    font-size: 52px;
     line-height: 1.04;
     letter-spacing: -2px;
     color: var(--foreground);
@@ -568,7 +557,7 @@
   .subtle {
     color: var(--muted-foreground);
   }
-  .query-document > .cm-theme {
+  .query-document > .sql-editor {
     padding: 0 13px 10px;
   }
   .cm-editor {
@@ -577,9 +566,6 @@
   .cm-gutterElement {
     padding: 0 14px 0 10px !important;
     min-width: 40px;
-  }
-  .cm-content {
-    caret-color: var(--ring);
   }
   .cm-tooltip {
     border-radius: 6px;
@@ -951,10 +937,7 @@
     border: 0;
     background: transparent;
     width: 100%;
-    font:
-      400 39px/1.3 "Newsreader Variable",
-      Georgia,
-      serif;
+    font: 400 39px/1.3 var(--mono);
     letter-spacing: -1px;
     color: var(--foreground);
     margin: 13px 0 7px;
@@ -1070,8 +1053,7 @@
   .markdown-content h1,
   .markdown-content h2,
   .markdown-content h3 {
-    font-family: "Newsreader Variable", Georgia, serif;
-    font-weight: 400;
+    font-weight: 600;
     color: var(--foreground);
     letter-spacing: -0.3px;
     line-height: 1.3;
@@ -1186,10 +1168,7 @@
     color: var(--muted-foreground);
   }
   .dialog-popup h2 {
-    font:
-      400 30px "Newsreader Variable",
-      Georgia,
-      serif;
+    font: 400 30px var(--mono);
     color: var(--foreground);
     margin: 20px 0 8px;
     letter-spacing: -0.5px;
@@ -1334,7 +1313,7 @@
     flex-direction: column;
     overflow: hidden;
   }
-  .query-editor-pane > .cm-theme {
+  .query-editor-pane > .sql-editor {
     flex: 1;
     min-height: 0;
     padding: 0 13px;
@@ -1581,6 +1560,57 @@
     font-weight: 600;
     margin-bottom: 8px;
   }
+  .appearance-option {
+    cursor: pointer;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--card);
+    color: var(--foreground);
+    font-size: 12px;
+    font-weight: 500;
+  }
+  .appearance-option:hover {
+    border-color: var(--ring);
+  }
+  .appearance-option[data-checked] {
+    border-color: var(--primary);
+    background: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--primary);
+  }
+  .appearance-option:focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  .palette-sample {
+    position: relative;
+    min-width: 0;
+    height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: var(--background);
+  }
+  .palette-sample::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 27%;
+    border-radius: 3px 0 0 3px;
+    border-right: 1px solid var(--border);
+    background: var(--sidebar);
+  }
+  .palette-sample::after {
+    content: "";
+    position: absolute;
+    top: 9px;
+    left: 40%;
+    width: 40%;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--primary);
+    box-shadow:
+      0 7px 0 var(--input),
+      0 14px 0 var(--border);
+  }
   .settings-row {
     display: flex;
     align-items: center;
@@ -1632,16 +1662,6 @@
   }
   .tabbar::-webkit-scrollbar {
     display: none;
-  }
-  /* Fade the edges once tabs no longer fit, so clipped tabs read as scrolled. */
-  .tabbar.overflowing {
-    mask-image: linear-gradient(
-      to right,
-      transparent 0,
-      #000 18px,
-      #000 calc(100% - 18px),
-      transparent 100%
-    );
   }
   .tab > button:first-child {
     min-width: 0;
@@ -2130,9 +2150,6 @@
     font-size: 13px;
     color: var(--foreground);
   }
-  .notebook-cell .cm-editor {
-    background: color-mix(in srgb, var(--muted) 55%, var(--background));
-  }
   .notebook-cell .execution-view {
     border-top: 1px solid var(--border);
   }
@@ -2516,10 +2533,7 @@
   }
   .relation-title {
     margin: 0;
-    font:
-      500 21px/1.2 "Newsreader Variable",
-      Georgia,
-      serif;
+    font: 500 21px/1.2 var(--mono);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2919,10 +2933,7 @@
   }
   .connections-list-heading h2 {
     margin: 0;
-    font:
-      500 22px/1.2 "Newsreader Variable",
-      Georgia,
-      serif;
+    font: 500 22px/1.2 var(--mono);
     color: var(--foreground);
   }
   .connections-list-heading p {

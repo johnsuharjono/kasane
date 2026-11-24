@@ -132,6 +132,40 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
   page.on("pageerror", (e) => errors.push(e.message));
   try {
     await page.goto("/");
+    const welcome = page.locator(".welcome");
+    await expect(welcome).toHaveCSS("background-image", "none");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("radio", { name: "Mono", exact: true }).click();
+    await page.keyboard.press("Escape");
+    const schemeMenu = page.getByRole("button", {
+      name: "Color scheme",
+      exact: true,
+    });
+    const schemeOption = (name) =>
+      page.getByRole("menuitemradio", { name, exact: true });
+    await schemeMenu.click();
+    await expect(schemeOption("System")).toHaveAttribute(
+      "aria-checked",
+      "true",
+    );
+    await schemeOption("Dark").click();
+    await expect(schemeMenu).toHaveAttribute("aria-expanded", "false");
+    await expect(welcome).toHaveCSS("background-color", "rgb(0, 0, 0)");
+    await schemeMenu.click();
+    await expect(schemeOption("Dark")).toHaveAttribute("aria-checked", "true");
+    await schemeOption("Light").click();
+    await expect(schemeMenu).toHaveAttribute("aria-expanded", "false");
+    await expect(welcome).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await schemeMenu.click();
+    await schemeOption("System").click();
+    await expect(schemeMenu).toHaveAttribute("aria-expanded", "false");
+    await page.emulateMedia({ colorScheme: "dark" });
+    await expect(welcome).toHaveCSS("background-color", "rgb(0, 0, 0)");
+    await page.emulateMedia({ colorScheme: "light" });
+    await expect(welcome).toHaveCSS("background-color", "rgb(255, 255, 255)");
+    await page.getByRole("button", { name: "Settings", exact: true }).click();
+    await page.getByRole("radio", { name: "Kasane", exact: true }).click();
+    await page.keyboard.press("Escape");
     await page
       .getByRole("button", { name: "Add a connection", exact: true })
       .click();
@@ -463,11 +497,28 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
       "background-color",
       "rgb(27, 30, 40)",
     );
+    await page.getByRole("radio", { name: "Moss", exact: true }).click();
+    await expect(page.locator(".cm-editor")).toHaveCSS(
+      "background-color",
+      "rgb(24, 35, 30)",
+    );
+    await expect(
+      page.getByRole("combobox", { name: "Editor theme", exact: true }),
+    ).toHaveCount(0);
     await page.getByRole("radio", { name: "System", exact: true }).click();
     await page.emulateMedia({ colorScheme: "dark" });
     await expect(page.locator("html")).toHaveClass(/dark/);
     await page.emulateMedia({ colorScheme: "light" });
     await expect(page.locator("html")).not.toHaveClass(/dark/);
+    await expect(page.locator("body")).toHaveCSS(
+      "background-color",
+      "rgb(245, 248, 243)",
+    );
+    await expect(page.locator(".cm-editor")).toHaveCSS(
+      "background-color",
+      "rgb(245, 248, 243)",
+    );
+    await page.getByRole("radio", { name: "Kasane", exact: true }).click();
     await page.getByRole("radio", { name: "Dark", exact: true }).click();
     await page.keyboard.press("Escape");
     await page
@@ -505,14 +556,26 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     await expect(
       page.getByRole("heading", { name: "Settings", exact: true }),
     ).toBeVisible();
+    await page.getByRole("radio", { name: "Dusk", exact: true }).click();
     await page.getByRole("radio", { name: "Light", exact: true }).click();
     await expect(page.locator("html")).not.toHaveClass(/dark/);
-    await page.keyboard.press("Escape");
+    await page.evaluate(() => {
+      const key = "kasane.preferences";
+      const stored = JSON.parse(localStorage.getItem(key));
+      stored.state.editorTheme = "poimandres";
+      localStorage.setItem(key, JSON.stringify(stored));
+    });
+    await page.reload();
+    await expect(page.locator("html")).toHaveAttribute("data-palette", "dusk");
     await page
       .getByRole("button", { name: "New document", exact: true })
       .click();
     await page.getByRole("menuitem", { name: /^Notebook/ }).click();
     await page.getByLabel("Notebook title").fill("Revenue exploration");
+    await expect(page.locator(".notebook-cell .cm-editor")).toHaveCSS(
+      "background-color",
+      "rgb(250, 246, 251)",
+    );
     const sql = page.locator(".notebook-cell .cm-content");
     await replaceEditor(sql, "CREATE TEMP TABLE notebook_probe (message text)");
     await page.getByRole("button", { name: "Run cell", exact: true }).click();

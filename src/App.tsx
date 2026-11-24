@@ -5,6 +5,8 @@ import {
   DropdownMenuTrigger,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuShortcut,
 } from "./components/ui/dropdown-menu";
 import {
@@ -51,7 +53,7 @@ import {
   CommandPalette,
   type PaletteAction,
 } from "./components/CommandPalette";
-import { useAppearance } from "./appearance";
+import { appearanceOptions, useAppearance } from "./appearance";
 import { connectionColor } from "./connection-colors";
 import { useDelayed } from "./use-delayed";
 import {
@@ -59,9 +61,7 @@ import {
   BookOpen,
   BookPlus,
   FilePlus2,
-  Moon,
   Network,
-  Sun,
   PanelLeft,
   Code2,
   Eye,
@@ -164,7 +164,9 @@ export default function App() {
   }>();
   const [hiddenTabs, setHiddenTabs] = useState<string[]>([]);
   const tabStrip = useRef<HTMLElement>(null);
-  const { resolved: theme, setAppearance } = useAppearance();
+  const { appearance, resolved: theme, setAppearance } = useAppearance();
+  const { icon: AppearanceIcon, label: appearanceLabel } =
+    appearanceOptions[appearance];
   const explorerState = explorer[selected] ?? { search: "", collapsed: [] };
   const search = explorerState.search;
   const setSearch = (search: string) =>
@@ -1304,11 +1306,7 @@ export default function App() {
         >
           <PanelLeft size={16} />
         </Button>
-        <nav
-          className={`tabbar ${hiddenTabs.length ? "overflowing" : ""}`}
-          aria-label="Open documents"
-          ref={tabStrip}
-        >
+        <nav className="tabbar" aria-label="Open documents" ref={tabStrip}>
           {visibleTabs.map((t) => {
             const tabRunning = Object.values(t.executions).some(
               (e) => e.state === "running",
@@ -1692,19 +1690,38 @@ export default function App() {
                     <Code2 size={15} aria-hidden="true" />
                     Settings
                   </Button>
-                  <Button
-                    className="quiet icon"
-                    aria-label={
-                      theme === "dark"
-                        ? "Switch to light theme"
-                        : "Switch to dark theme"
-                    }
-                    onClick={() =>
-                      setAppearance(theme === "dark" ? "light" : "dark")
-                    }
-                  >
-                    {theme === "dark" ? <Sun size={15} /> : <Moon size={15} />}
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger
+                      render={
+                        <Button
+                          className="quiet icon"
+                          aria-label="Color scheme"
+                          title={`Color scheme (${appearanceLabel})`}
+                        />
+                      }
+                    >
+                      <AppearanceIcon size={15} aria-hidden="true" />
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent side="top" align="end">
+                      <DropdownMenuRadioGroup
+                        value={appearance}
+                        onValueChange={setAppearance}
+                      >
+                        {Object.values(appearanceOptions).map(
+                          ({ value, label, icon: Icon }) => (
+                            <DropdownMenuRadioItem
+                              key={value}
+                              value={value}
+                              closeOnClick
+                            >
+                              <Icon aria-hidden="true" />
+                              {label}
+                            </DropdownMenuRadioItem>
+                          ),
+                        )}
+                      </DropdownMenuRadioGroup>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               </aside>
             </ResizablePanel>
