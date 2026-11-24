@@ -62,7 +62,7 @@ Generated SQL quotes each schema/table/column identifier separately and doubles 
 
 ## Table pages and preferences
 
-Table previews fetch 500 rows plus one lookahead row, using LIMIT/OFFSET. The extra row determines Next independently of the exact count. PK column ordinals come from pg_index; PK columns break sorted ties and define default ordering. Keyless relations use output columns cast to text with C collation as tie breakers. Offset paging is not a long-lived snapshot: concurrent writes may move rows, and deep offsets or keyless sorts can be expensive.
+Table previews fetch a selectable number of rows (25–500, default 50) plus one lookahead row, using LIMIT/OFFSET. The extra row determines Next independently of the exact count. PK column ordinals come from pg_index; PK columns break sorted ties and define default ordering. Keyless relations use output columns cast to text with C collation as tie breakers. Offset paging is not a long-lived snapshot: concurrent writes may move rows, and deep offsets or keyless sorts can be expensive.
 
 After a page renders, the table browser computes an exact filtered total on a short-lived session when the filter changes or the user refreshes. Paging and sorting reuse the total or its pending request for the same filter. A pending count can be cancelled independently, and changing the filter discards the old request. Counts remain exact decimal strings and use BigInt for formatting/page arithmetic. They describe the last count snapshot, match the active filter, and are never persisted. Sorting and filtering reset to page one. A retention-budget-truncated page disables Next to avoid skipping unretained rows.
 

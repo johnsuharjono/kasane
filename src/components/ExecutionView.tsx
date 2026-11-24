@@ -1,5 +1,5 @@
 import { Layers } from "lucide-react";
-import { ResultsGrid } from "./ResultsGrid";
+import { ResultsGrid, type GridEditing } from "./ResultsGrid";
 import type {
   ColumnReference,
   Execution,
@@ -12,6 +12,8 @@ export function ExecutionView({
   onSort,
   compact = false,
   rowOffset = 0,
+  selectRows = false,
+  editing,
   relation,
   onOpenReference,
 }: {
@@ -20,6 +22,8 @@ export function ExecutionView({
   onOpenReference?: (reference: ColumnReference, value: string) => void;
   compact?: boolean;
   rowOffset?: number;
+  selectRows?: boolean;
+  editing?: GridEditing;
   sort?: TableSettings["sort"];
   onSort?: (column: string) => void;
 }) {
@@ -62,6 +66,9 @@ export function ExecutionView({
       )}
       {e.result && (
         <ResultsGrid
+          key={selectRows ? e.requestId : undefined}
+          selectRows={selectRows}
+          editing={editing}
           compact={compact}
           rowOffset={rowOffset}
           result={e.result}

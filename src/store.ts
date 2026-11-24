@@ -250,7 +250,6 @@ export const useWorkspace = create<Workspace>()(
           diagram: t.diagram,
           view: t.view,
           tableSettings: t.tableSettings,
-          filtersOpen: t.filtersOpen,
           editorHeight: t.editorHeight,
         })),
       }),

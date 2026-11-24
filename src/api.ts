@@ -9,6 +9,7 @@ import type {
   Relation,
   RelationStructure,
   SQLDocument,
+  TableRowEdit,
 } from "./types";
 export const native = isTauri();
 export async function call<T>(
@@ -46,6 +47,20 @@ export const api = {
   close: (sessionId: string) => call<void>("close_session", { sessionId }),
   execute: (sessionId: string, requestId: string, sql: string) =>
     call<Result>("execute_sql", { sessionId, requestId, sql }),
+  applyTableUpdates: (
+    sessionId: string,
+    relation: Relation,
+    rows: TableRowEdit[],
+  ) =>
+    call<void>("apply_table_updates", {
+      sessionId,
+      schema: relation.schema,
+      relation: relation.name,
+      rows: rows.map(({ cells, ...identity }) => ({
+        ...identity,
+        cells: cells.map(({ column, value }) => ({ column, value })),
+      })),
+    }),
   cancel: (sessionId: string, requestId: string) =>
     call<void>("cancel_query", { sessionId, requestId }),
   notebooks: () => call<Notebook[]>("list_notebooks"),
@@ -82,6 +97,7 @@ export const api = {
       fkSchema,
       fkTable,
       fkColumn,
+      canUpdate,
     ] of result.rows) {
       const key = JSON.stringify([schema, name]);
       if (!map.has(key))
@@ -96,6 +112,7 @@ export const api = {
         name: column!,
         type: type!,
         required: required === "true",
+        canUpdate: canUpdate === "true",
         primaryKeyPosition: primaryKeyPosition
           ? Number(primaryKeyPosition)
           : undefined,

@@ -12,7 +12,7 @@ A macOS PostgreSQL client with SQL documents and notebooks.
 - Jump to any table, column, document or command with ⌘K.
 - Inspect whole rows, copy results as TSV, JSON or INSERT, export displayed rows as CSV, cancel queries, and switch between light and dark themes.
 
-Kasane is in development. Table data is read-only; SQL statements can modify your database. Each execution accepts one statement, with results capped at 1,000 rows or 8 MiB. Queries are never automatically retried.
+Kasane is in development. In Table Data, double-click an editable cell to stage a change. Table editing requires a primary key and database privileges. Review the diff or SQL and choose **Apply changes** to commit the batch. Drafts live in the open table tab. SQL statements can also modify your database. Each editor execution accepts one statement, with results capped at 1,000 rows or 8 MiB. Queries and table updates are never automatically retried.
 
 ## Development
 

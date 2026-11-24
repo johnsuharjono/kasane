@@ -50,6 +50,7 @@ export type Relation = {
     type: string;
     required: boolean;
     primaryKeyPosition?: number;
+    canUpdate?: boolean;
     /** Single-column foreign key target. */
     references?: ColumnReference;
   }[];
@@ -91,6 +92,25 @@ export type SQLDocument = {
   connectionId: string | null;
   source: string;
 };
+export type RowIdentity = {
+  key: string[];
+  tableOid: string;
+  tuple: string;
+  version: string;
+};
+export type TableCellEdit = {
+  column: string;
+  before: string | null;
+  value: string | null;
+};
+export type TableRowEdit = RowIdentity & { cells: TableCellEdit[] };
+export type TableEdit = {
+  rows: TableRowEdit[];
+  sessionId?: string;
+  reviewOpen: boolean;
+  applying?: boolean;
+  error?: DbError;
+};
 export type Execution = {
   state: "running" | "success" | "failed";
   requestId: string;
@@ -99,15 +119,25 @@ export type Execution = {
   /** Notebook execution counter shown as [n] beside the cell. */
   runNumber?: number;
   hasNextPage?: boolean;
+  rowIdentities?: RowIdentity[];
+  editSessionId?: string;
   result?: Result;
   error?: DbError;
 };
+export type TableFilter = {
+  column: string;
+  operator: "contains" | "equals" | "is-null";
+  value: string;
+};
 export type TableSettings = {
   page?: number;
+  pageSize?: number;
   sort?: { column: string; direction: "asc" | "desc" };
-  filterColumn: string;
-  filterOperator: "contains" | "equals" | "is-null";
-  filterValue: string;
+  filters?: TableFilter[];
+  /** Single-filter settings saved by older versions. */
+  filterColumn?: string;
+  filterOperator?: TableFilter["operator"];
+  filterValue?: string;
   /** Columns left out of the SELECT list. */
   hiddenColumns?: string[];
 };
@@ -133,7 +163,7 @@ export type Tab = {
   relation?: Relation;
   view?: "data" | "query" | "structure";
   tableSettings?: TableSettings;
-  filtersOpen?: boolean;
+  tableEdit?: TableEdit;
   editorHeight?: number;
   restored?: boolean;
   sessionId?: string;

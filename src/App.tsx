@@ -17,10 +17,12 @@ import { ExecutionView } from "./components/ExecutionView";
 import {
   tableQuery,
   tableCountQuery,
-  TABLE_PAGE_SIZE,
+  tablePrimaryKey,
+  pageSizeFor,
   defaultTableSettings,
 } from "./table-query";
-import type { TableSettings } from "./types";
+import type { RowIdentity, TableEdit, TableSettings } from "./types";
+import { tableEditUnavailable } from "./table-edits";
 import {
   ContextMenu,
   ContextMenuTrigger,
@@ -63,7 +65,6 @@ import {
   PanelLeft,
   Code2,
   Eye,
-  Filter,
   ChevronRight,
   Database,
   FileCode2,
@@ -77,7 +78,6 @@ import {
   ArrowDown,
   Trash2,
   Save,
-  RefreshCw,
   CircleHelp,
   Check,
 } from "lucide-react";
@@ -203,6 +203,7 @@ export default function App() {
     Number(localStorage.getItem("kasane.sidebarWidth")) || 252,
   );
   const busy = useRef(new Set<string>());
+  const [discardTableTab, setDiscardTableTab] = useState<string>();
   const queryRequests = useRef(
     new Map<string, { cancelled: boolean; sessionId?: string }>(),
   );
@@ -273,6 +274,16 @@ export default function App() {
         const relations = await api.catalog(id);
         if (!active) return;
         catalogCache.current.set(selected, relations);
+        for (const document of useWorkspace.getState().tabs) {
+          if (document.connectionId !== selected || !document.relation)
+            continue;
+          const relation = relations.find(
+            (r) =>
+              r.schema === document.relation?.schema &&
+              r.name === document.relation?.name,
+          );
+          if (relation) patch(document.id, (t) => ({ ...t, relation }));
+        }
         setBrowser({ connectionId: selected, sessionId: id, relations });
       } catch (e) {
         release();
@@ -292,11 +303,17 @@ export default function App() {
     setRevision((v) => v + 1);
   }
   async function disconnect() {
-    setPaused(selected);
-    setBrowser(undefined);
     const documents = useWorkspace
       .getState()
       .tabs.filter((t) => t.connectionId === selected);
+    if (documents.some((document) => document.tableEdit?.applying)) {
+      setNotice(
+        "Wait for table changes to finish applying before disconnecting.",
+      );
+      return;
+    }
+    setPaused(selected);
+    setBrowser(undefined);
     for (const document of documents) {
       stopTableCount(document.id);
       patch(document.id, (t) => ({
@@ -397,8 +414,9 @@ export default function App() {
   ) {
     if (!t.relation || busy.current.has(t.id)) return;
     busy.current.add(t.id);
+    const captureRows = !tableEditUnavailable(t.relation);
     const requestId = uid(),
-      source = tableQuery(t.relation, settings);
+      source = tableQuery(t.relation, settings, captureRows);
     const countSource = tableCountQuery(t.relation, settings);
     const previousCount = tableCountResults[t.id];
     const needsCount =
@@ -413,10 +431,40 @@ export default function App() {
         requestId,
         source,
       );
-      const pageSize = TABLE_PAGE_SIZE;
-      const rows = fetched.rows.slice(0, pageSize);
-      const result = { ...fetched, rows, returnedRows: String(rows.length) };
+      const pageSize = pageSizeFor(settings);
+      const page = fetched.rows.slice(0, pageSize);
+      let rowIdentities: RowIdentity[] | undefined;
+      const visible =
+        fetched.columns.length -
+        (captureRows ? tablePrimaryKey(t.relation).length + 3 : 0);
+      const rows = captureRows
+        ? page.map((row) => row.slice(0, visible))
+        : page;
+      if (captureRows) {
+        const identities = page.map((row) => {
+          const [tableOid, tuple, version] = row.slice(-3);
+          const key = row.slice(visible, -3);
+          return tableOid &&
+            tuple &&
+            version &&
+            key.every((value) => value !== null)
+            ? { tableOid, tuple, version, key }
+            : undefined;
+        });
+        if (identities.every((identity) => identity !== undefined))
+          rowIdentities = identities;
+      }
+      const result = {
+        ...fetched,
+        columns: captureRows
+          ? fetched.columns.slice(0, visible)
+          : fetched.columns,
+        rows,
+        returnedRows: String(rows.length),
+      };
       setExecution(t.id, "table-data", {
+        rowIdentities,
+        editSessionId: rowIdentities ? sessionId : undefined,
         hasNextPage: !fetched.truncated && fetched.rows.length > pageSize,
         state: "success",
         requestId,
@@ -441,6 +489,62 @@ export default function App() {
     } finally {
       busy.current.delete(t.id);
     }
+  }
+  function updateTableEdit(t: Tab, tableEdit: TableEdit | undefined) {
+    patch(t.id, (current) =>
+      current.tableEdit?.applying ? current : { ...current, tableEdit },
+    );
+  }
+
+  async function applyTableEdits(t: Tab) {
+    const edit = t.tableEdit;
+    if (
+      !t.relation ||
+      !edit?.rows.length ||
+      !t.sessionId ||
+      edit.sessionId !== t.sessionId ||
+      t.disconnected ||
+      busy.current.has(t.id)
+    )
+      return;
+    busy.current.add(t.id);
+    patch(t.id, (current) => ({
+      ...current,
+      tableEdit: { ...edit, applying: true, error: undefined },
+    }));
+    try {
+      await api.applyTableUpdates(t.sessionId, t.relation, edit.rows);
+      patch(t.id, (current) => ({
+        ...current,
+        tableEdit: undefined,
+        executions: {
+          ...current.executions,
+          "table-data": { ...current.executions["table-data"], outdated: true },
+        },
+      }));
+      setFlash(
+        edit.rows.length === 1
+          ? "Changes applied to 1 row."
+          : `Changes applied to ${edit.rows.length} rows.`,
+      );
+    } catch (e) {
+      const error = asError(e);
+      patch(t.id, (current) => ({
+        ...current,
+        disconnected: current.disconnected || error.disconnected,
+        tableEdit: { ...edit, error, applying: false },
+      }));
+      return;
+    } finally {
+      busy.current.delete(t.id);
+    }
+    const current = useWorkspace.getState().tabs.find((tab) => tab.id === t.id);
+    if (current?.sessionId === t.sessionId)
+      await runTable(
+        current,
+        current.tableSettings ?? defaultTableSettings,
+        "refresh",
+      );
   }
   function stopTableCount(tabId: string) {
     const stop = tableCounts.current.get(tabId);
@@ -654,7 +758,17 @@ export default function App() {
       setNotice(asError(e).message);
     }
   }
-  async function closeTab(t: Tab) {
+  async function closeTab(t: Tab, discardEdits = false) {
+    if (t.tableEdit?.applying) {
+      setNotice(
+        "Wait for table changes to finish applying before closing this tab.",
+      );
+      return;
+    }
+    if (t.tableEdit?.rows.length && !discardEdits) {
+      setDiscardTableTab(t.id);
+      return;
+    }
     if (Object.values(t.executions).some((e) => e.state === "running")) {
       setNotice("Cancel the running query before closing this tab.");
       return;
@@ -793,9 +907,7 @@ export default function App() {
     }
     openTable(target, "data", {
       ...defaultTableSettings,
-      filterColumn: reference.column,
-      filterOperator: "equals",
-      filterValue: value,
+      filters: [{ column: reference.column, operator: "equals", value }],
     });
   }
   function newCell(kind: "sql" | "markdown") {
@@ -1011,6 +1123,7 @@ export default function App() {
     );
   }
   async function reconnect(t: Tab) {
+    if (t.tableEdit?.applying) return;
     try {
       if (t.sessionId) await api.close(t.sessionId).catch(() => {});
       await sessionFor({ ...t, sessionId: undefined, disconnected: false });
@@ -1692,44 +1805,16 @@ export default function App() {
                       Reconnect session
                     </Button>
                   )}
-                  {tab.view === "data" && (
-                    <Button
-                      className="quiet"
-                      aria-label="Filter rows"
-                      aria-expanded={!!tab.filtersOpen}
-                      onClick={() =>
-                        patch(tab.id, (t) => ({
-                          ...t,
-                          filtersOpen: !t.filtersOpen,
-                        }))
-                      }
-                    >
-                      <Filter size={14} />
-                      Filter
-                      {tab.tableSettings?.filterColumn && (
-                        <span className="filter-count">1</span>
-                      )}
-                    </Button>
-                  )}
                   <Button onClick={() => openTable(tab.relation!, "query")}>
                     <FileCode2 size={14} />
                     Open as SQL
                   </Button>
-                  {tab.view === "data" &&
-                    (showBusy ? (
-                      <Button className="danger" onClick={() => cancel(tab)}>
-                        <Square size={12} />
-                        Cancel
-                      </Button>
-                    ) : (
-                      <Button
-                        className="icon"
-                        aria-label="Refresh table data"
-                        onClick={() => refreshTable(tab)}
-                      >
-                        <RefreshCw size={14} />
-                      </Button>
-                    ))}
+                  {tab.view === "data" && showBusy && (
+                    <Button className="danger" onClick={() => cancel(tab)}>
+                      <Square size={12} />
+                      Cancel
+                    </Button>
+                  )}
                 </Tabs>
                 {tab.view === "structure" ? (
                   <StructureView
@@ -1751,6 +1836,9 @@ export default function App() {
                       )
                     }
                     onExecute={(settings) => void runTable(tab, settings)}
+                    onRefresh={() => refreshTable(tab)}
+                    onEditChange={(edit) => updateTableEdit(tab, edit)}
+                    onApplyEdits={() => void applyTableEdits(tab)}
                     count={tableCountResults[tab.id]}
                     onCancelCount={() => stopTableCount(tab.id)}
                     onOpenReference={openReference}
@@ -2182,18 +2270,6 @@ export default function App() {
             {activeWorkspace.port}/{activeWorkspace.database}
           </span>
         )}
-        <span className="spacer" />
-        {tab && !tab.relation && tab.kind !== "diagram" && (
-          <span>
-            {tab.kind === "notebook" ? "Notebook" : "Query"} session ·{" "}
-            {sessionState(tab).label.toLowerCase()}
-          </span>
-        )}
-        {tab?.relation && <span>Table session · read-only</span>}
-        <span className="footer-separator" />
-        <span>UTC</span>
-        <span className="footer-separator" />
-        <span>PostgreSQL</span>
       </footer>
       <div className="toasts" aria-live="polite">
         {notice && (
@@ -2222,6 +2298,36 @@ export default function App() {
           </div>
         )}
       </div>
+      <Dialog
+        open={!!discardTableTab}
+        onOpenChange={(open) => {
+          if (!open) setDiscardTableTab(undefined);
+        }}
+      >
+        <DialogContent className="confirm-dialog sm:max-w-[420px]">
+          <DialogTitle>Discard table edits?</DialogTitle>
+          <DialogDescription>
+            Closing this tab will discard its staged changes.
+          </DialogDescription>
+          <div className="confirm-actions">
+            <Button onClick={() => setDiscardTableTab(undefined)}>
+              Keep editing
+            </Button>
+            <Button
+              className="danger"
+              onClick={() => {
+                const document = useWorkspace
+                  .getState()
+                  .tabs.find((t) => t.id === discardTableTab);
+                setDiscardTableTab(undefined);
+                if (document) void closeTab(document, true);
+              }}
+            >
+              Discard and close
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
       <CommandPalette
         open={paletteOpen}
         onOpenChange={setPaletteOpen}

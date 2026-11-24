@@ -1,10 +1,19 @@
 import { api, native, quoteIdent } from "../api";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { memo, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  memo,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   useTable,
   tableFeatures,
   columnSizingFeature,
+  rowSelectionFeature,
 } from "@tanstack/react-table";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import {
@@ -12,6 +21,7 @@ import {
   ArrowUp,
   ArrowUpRight,
   Check,
+  ChevronDown,
   Copy,
   Download,
   KeyRound,
@@ -19,6 +29,13 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "./Button";
+import { Checkbox } from "./ui/checkbox";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 import type {
   Column,
   ColumnReference,
@@ -27,7 +44,7 @@ import type {
   TableSettings,
 } from "../types";
 import { asError } from "../types";
-const features = tableFeatures({ columnSizingFeature });
+const features = tableFeatures({ columnSizingFeature, rowSelectionFeature });
 // Two-line header: column name above its type.
 const HEADER_HEIGHT = 46;
 const MIN_COLUMN_WIDTH = 80;
@@ -35,6 +52,18 @@ const MAX_COLUMN_WIDTH = 800;
 const clampColumnWidth = (width: number) =>
   Math.min(MAX_COLUMN_WIDTH, Math.max(MIN_COLUMN_WIDTH, width));
 type Point = { row: number; col: number };
+export type GridEditing = {
+  canEdit: (row: number, column: string) => boolean;
+  isStaged: (row: number, column: string) => boolean;
+  openEditor: (row: number, column: number, anchor: HTMLElement) => void;
+  inlineEditor?: {
+    row: number;
+    column: number;
+    content: (restoreFocus: () => void) => ReactNode;
+  };
+  reviewOpen: boolean;
+  closeReview: () => void;
+};
 const isNumber = (c: Column) => /int|numeric|float/.test(c.dataType);
 const isChip = (c: Column) => c.isEnum || c.dataType === "bool";
 const display = (c: Column, v: string) =>
@@ -45,6 +74,25 @@ function cellPreview(column: Column, value: string | null) {
   if (isChip(column))
     return { text: display(column, value), className: "value-chip" };
   return { text: value.length > 160 ? `${value.slice(0, 160)}…` : value };
+}
+
+function defaultTableColumnWidth(
+  column: Column,
+  rows: Result["rows"],
+  index: number,
+) {
+  const json = /^jsonb?$/.test(column.dataType);
+  const minimum = json ? 300 : isNumber(column) ? 96 : 120;
+  const maximum = json ? 540 : 340;
+  let width = Math.max(column.name.length, column.dataType.length) * 7 + 42;
+  // Use a bounded sample and the same truncated previews the grid displays.
+  for (const row of rows.slice(0, 32)) {
+    width = Math.max(
+      width,
+      cellPreview(column, row[index]).text.length * 7 + 28,
+    );
+  }
+  return Math.min(maximum, Math.max(minimum, width));
 }
 
 function measureColumnWidth(
@@ -102,6 +150,8 @@ export const ResultsGrid = memo(function ResultsGrid({
   onSort,
   compact = false,
   rowOffset = 0,
+  selectRows = false,
+  editing,
   relation,
   onOpenReference,
 }: {
@@ -110,6 +160,8 @@ export const ResultsGrid = memo(function ResultsGrid({
   onOpenReference?: (reference: ColumnReference, value: string) => void;
   compact?: boolean;
   rowOffset?: number;
+  selectRows?: boolean;
+  editing?: GridEditing;
   sort?: TableSettings["sort"];
   onSort?: (column: string) => void;
 }) {
@@ -131,19 +183,35 @@ export const ResultsGrid = memo(function ResultsGrid({
   const [exportError, setExportError] = useState("");
   const drag = useRef<AbortController | null>(null);
   useEffect(() => () => drag.current?.abort(), []);
+  const initialRows = useRef(result.rows);
   const columns = useMemo(
     () =>
       result.columns.map((c, i) => ({
         id: String(i),
         accessorFn: (row: (string | null)[]) => row[i],
         header: c.name,
-        size: isNumber(c) ? 140 : isChip(c) ? 150 : 210,
+        size: selectRows
+          ? defaultTableColumnWidth(c, initialRows.current, i)
+          : isNumber(c)
+            ? 140
+            : isChip(c)
+              ? 150
+              : 210,
         minSize: MIN_COLUMN_WIDTH,
         maxSize: MAX_COLUMN_WIDTH,
       })),
-    [result.columns],
+    [result.columns, selectRows],
   );
-  const table = useTable({ features, columns, data: result.rows });
+  const table = useTable({
+    features,
+    columns,
+    data: result.rows,
+    enableRowSelection: selectRows,
+  });
+  const selectedRows = selectRows ? table.getSelectedRowModel().flatRows : [];
+  const selectedCount = selectedRows.length;
+  const allRowsSelected = selectRows && table.getIsAllPageRowsSelected();
+  const gridRows = selectRows ? table.getCoreRowModel().rows : undefined;
   const leaf = table.getAllLeafColumns();
   const sizes = leaf.map((c) => c.getSize());
   const sizingKey = sizes.join(",");
@@ -196,15 +264,20 @@ export const ResultsGrid = memo(function ResultsGrid({
       setCopyState("Clipboard unavailable");
     }
   }
+  function rowObject(row: Result["rows"][number]) {
+    return Object.fromEntries(
+      result.columns.map((column, i) => [column.name, row[i]]),
+    );
+  }
   function copyRowJSON() {
     const row = result.rows[end.row];
-    if (!row) return;
-    void writeClipboard(
-      JSON.stringify(
-        Object.fromEntries(result.columns.map((c, i) => [c.name, row[i]])),
-        null,
-        2,
-      ),
+    if (row) void writeClipboard(JSON.stringify(rowObject(row), null, 2));
+  }
+  function rowsAsCSV(rows: Result["rows"]) {
+    const header = result.columns.map((column) => column.name);
+    return (
+      [header, ...rows].map((row) => row.map(csvField).join(",")).join("\r\n") +
+      "\r\n"
     );
   }
   function copyRowInsert() {
@@ -234,24 +307,34 @@ export const ResultsGrid = memo(function ResultsGrid({
     setExporting(true);
     setExportError("");
     try {
-      const rowCount = result.rows.length;
-      const summary = `${rowCount.toLocaleString()} displayed ${rowCount === 1 ? "row" : "rows"}`;
+      const rows = selectedCount
+        ? selectedRows.map((row) => row.original)
+        : result.rows;
+      const rowCount = rows.length;
+      const summary = `${rowCount.toLocaleString()} ${selectedCount ? "selected" : "displayed"} ${rowCount === 1 ? "row" : "rows"}`;
       const path = await saveDialog({
         defaultPath: "results.csv",
         title: `Export ${summary}${result.truncated ? " (limited result)" : ""}`,
         filters: [{ name: "CSV", extensions: ["csv"] }],
       });
       if (!path) return;
-      const header = result.columns.map((column) => column.name);
-      const csv = [header, ...result.rows]
-        .map((row) => row.map(csvField).join(","))
-        .join("\r\n");
-      await api.writeCSV(path, csv + "\r\n");
+      await api.writeCSV(path, rowsAsCSV(rows));
     } catch (error) {
       setExportError(asError(error).message);
     } finally {
       setExporting(false);
     }
+  }
+  function openInspector(open: boolean) {
+    if (open && editing?.reviewOpen) editing.closeReview();
+    setInspect(open);
+  }
+  function activateCell(row: number, col: number) {
+    const column = result.columns[col];
+    const cell = document.getElementById(`${gridId}-cell-${row}-${col}`);
+    if (cell && column && editing?.canEdit(row, column.name))
+      editing.openEditor(row, col, cell);
+    else if (!selectRows) openInspector(true);
   }
   function move(point: Point, extend = false) {
     point = {
@@ -279,43 +362,115 @@ export const ResultsGrid = memo(function ResultsGrid({
   return (
     <div className="results" data-testid="results">
       <div className="results-toolbar">
-        <span className="result-status">
-          <Check size={13} className="ok" aria-hidden="true" />
-          <span>
-            {result.truncated
-              ? `${result.rows.length.toLocaleString()} of ${Number(result.returnedRows).toLocaleString()} returned`
-              : `${Number(result.returnedRows).toLocaleString()} returned`}
-          </span>
-          <span aria-hidden="true">·</span>
-          <span>{result.durationMs.toFixed(1)} ms</span>
-          {result.truncated && (
-            <span className="warning">Limited to 1,000 rows / 8 MiB</span>
-          )}
-        </span>
-        <span className="spacer" />
-        <Button
-          className="quiet"
-          onClick={copy}
-          disabled={!result.rows.length}
-          title="Copy selected cells (⌘C)"
-        >
-          <Copy size={13} />
-          {copyState || "Copy"}
-        </Button>
-        <Button
-          className="quiet"
-          onClick={() => void exportCSV()}
-          disabled={exporting}
-          title="Save the displayed rows and columns"
-        >
-          <Download size={13} aria-hidden="true" />
-          Export CSV
-        </Button>
+        {selectedCount ? (
+          <>
+            <span className="row-selection-count" role="status">
+              {selectedCount.toLocaleString()} selected
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    className="quiet small"
+                    aria-label="Copy selected rows"
+                  />
+                }
+              >
+                <Copy size={13} aria-hidden="true" />
+                Copy rows
+                <ChevronDown size={12} aria-hidden="true" />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent className="w-auto min-w-36">
+                <DropdownMenuItem
+                  onClick={() =>
+                    void writeClipboard(
+                      JSON.stringify(
+                        selectedRows.map((row) => rowObject(row.original)),
+                        null,
+                        2,
+                      ),
+                    )
+                  }
+                >
+                  Copy as JSON
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onClick={() =>
+                    void writeClipboard(
+                      rowsAsCSV(selectedRows.map((row) => row.original)),
+                    )
+                  }
+                >
+                  Copy as CSV
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              className="quiet small"
+              onClick={() => void exportCSV()}
+              disabled={exporting}
+              title="Save the selected rows and displayed columns"
+            >
+              <Download size={13} aria-hidden="true" />
+              Export CSV
+            </Button>
+            <Button
+              className="quiet icon"
+              onClick={() => {
+                table.resetRowSelection(true);
+                setCopyState("");
+              }}
+              aria-label="Clear row selection"
+              title="Clear row selection"
+            >
+              <X size={14} aria-hidden="true" />
+            </Button>
+            <span className="row-selection-feedback" role="status">
+              {copyState}
+            </span>
+            <span className="spacer" />
+          </>
+        ) : (
+          <>
+            <span className="result-status">
+              <Check size={13} className="ok" aria-hidden="true" />
+              <span>
+                {result.truncated
+                  ? `${result.rows.length.toLocaleString()} of ${Number(result.returnedRows).toLocaleString()} returned`
+                  : `${Number(result.returnedRows).toLocaleString()} returned`}
+              </span>
+              <span aria-hidden="true">·</span>
+              <span>{result.durationMs.toFixed(1)} ms</span>
+              {result.truncated && (
+                <span className="warning">Limited to 1,000 rows / 8 MiB</span>
+              )}
+            </span>
+            <span className="spacer" />
+            <Button
+              className="quiet"
+              onClick={copy}
+              disabled={!result.rows.length}
+              title="Copy selected cells (⌘C)"
+            >
+              <Copy size={13} />
+              {copyState || "Copy"}
+            </Button>
+            <Button
+              className="quiet"
+              onClick={() => void exportCSV()}
+              disabled={exporting}
+              title="Save the displayed rows and columns"
+            >
+              <Download size={13} aria-hidden="true" />
+              Export CSV
+            </Button>
+          </>
+        )}
         <Button
           className="icon quiet"
           aria-label="Inspect selected row"
-          aria-pressed={inspect}
-          onClick={() => setInspect(!inspect)}
+          aria-pressed={inspect && !editing?.reviewOpen}
+          onClick={() => openInspector(!inspect || !!editing?.reviewOpen)}
         >
           <PanelRightOpen size={15} />
         </Button>
@@ -347,9 +502,10 @@ export const ResultsGrid = memo(function ResultsGrid({
           ref={scroll}
           className="data-grid"
           role="grid"
-          aria-label="Query results"
+          aria-label={selectRows ? "Table data" : "Query results"}
+          aria-multiselectable={selectRows || undefined}
           aria-rowcount={result.rows.length + 1}
-          aria-colcount={columns.length}
+          aria-colcount={columns.length + Number(selectRows)}
           tabIndex={0}
           aria-activedescendant={
             result.rows.length
@@ -357,6 +513,7 @@ export const ResultsGrid = memo(function ResultsGrid({
               : undefined
           }
           onKeyDown={(e) => {
+            if (selectRows && e.target !== e.currentTarget) return;
             if ((e.metaKey || e.ctrlKey) && e.key === "c") {
               e.preventDefault();
               void copy();
@@ -374,7 +531,7 @@ export const ResultsGrid = memo(function ResultsGrid({
             else if (e.key === "ArrowUp") next.row--;
             else if (e.key === "ArrowLeft") next.col--;
             else if (e.key === "ArrowRight") next.col++;
-            else if (e.key === "Tab") {
+            else if (e.key === "Tab" && !selectRows) {
               next.col += e.shiftKey ? -1 : 1;
               if (next.col >= columns.length) {
                 next.col = 0;
@@ -391,7 +548,8 @@ export const ResultsGrid = memo(function ResultsGrid({
               next.col = columns.length - 1;
               if (e.metaKey || e.ctrlKey) next.row = result.rows.length - 1;
             } else if (e.key === "Enter") {
-              setInspect((v) => !v);
+              if (selectRows) activateCell(end.row, end.col);
+              else openInspector(!inspect);
             } else handled = false;
             if (handled) {
               e.preventDefault();
@@ -404,12 +562,32 @@ export const ResultsGrid = memo(function ResultsGrid({
             role="row"
             style={{ width, height: HEADER_HEIGHT }}
           >
-            <div className="row-number header-number">#</div>
+            {selectRows ? (
+              <div
+                className="row-number header-number row-selector"
+                role="columnheader"
+                aria-colindex={1}
+              >
+                <Checkbox
+                  aria-label="Select all rows on this page"
+                  checked={allRowsSelected}
+                  indeterminate={selectedCount > 0 && !allRowsSelected}
+                  disabled={!result.rows.length}
+                  onCheckedChange={(checked) => {
+                    setCopyState("");
+                    table.toggleAllPageRowsSelected(checked);
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="row-number header-number">#</div>
+            )}
             {horizontal.getVirtualItems().map((v) => (
               <div
                 key={v.key}
                 className="column-header"
                 role="columnheader"
+                aria-colindex={v.index + 1 + Number(selectRows)}
                 aria-sort={
                   sort?.column === result.columns[v.index].name
                     ? sort.direction === "asc"
@@ -502,65 +680,102 @@ export const ResultsGrid = memo(function ResultsGrid({
             className="grid-canvas"
             style={{ height: vertical.getTotalSize(), width }}
           >
-            {vertical.getVirtualItems().map((v) => (
-              <div
-                key={v.key}
-                className="grid-row"
-                role="row"
-                aria-rowindex={v.index + 2}
-                style={{
-                  position: "absolute",
-                  top: v.start - HEADER_HEIGHT,
-                  height: 32,
-                  width,
-                }}
-              >
-                <div className="row-number">{v.index + 1 + rowOffset}</div>
-                {horizontal.getVirtualItems().map((c) => {
-                  const value = result.rows[v.index][c.index],
-                    column = result.columns[c.index],
-                    preview = cellPreview(column, value),
-                    selected =
-                      v.index >= minRow &&
-                      v.index <= maxRow &&
-                      c.index >= minCol &&
-                      c.index <= maxCol;
-                  return (
+            {vertical.getVirtualItems().map((v) => {
+              const row = gridRows?.[v.index];
+              const rowSelected = row?.getIsSelected();
+              return (
+                <div
+                  key={v.key}
+                  className="grid-row"
+                  aria-selected={rowSelected}
+                  role="row"
+                  aria-rowindex={v.index + 2}
+                  style={{
+                    position: "absolute",
+                    top: v.start - HEADER_HEIGHT,
+                    height: 32,
+                    width,
+                  }}
+                >
+                  {row ? (
                     <div
-                      id={`${gridId}-cell-${v.index}-${c.index}`}
-                      key={c.key}
-                      role="gridcell"
-                      aria-colindex={c.index + 1}
-                      aria-selected={selected}
-                      className={`grid-cell ${selected ? "selected" : ""} ${value === null ? "null-value" : ""} ${isNumber(column) ? "number-value" : ""}`}
-                      style={{ left: c.start, width: c.size }}
-                      onPointerDown={(e) => {
-                        e.preventDefault();
-                        selecting.current = true;
-                        setEnd({ row: v.index, col: c.index });
-                        if (!e.shiftKey)
-                          setAnchor({ row: v.index, col: c.index });
-                        setCopyState("");
-                        scroll.current?.focus();
-                      }}
-                      onPointerEnter={(e) => {
-                        if (selecting.current && e.buttons === 1)
-                          setEnd({ row: v.index, col: c.index });
-                      }}
-                      onDoubleClick={() => setInspect(true)}
+                      className="row-number row-selector"
+                      role="rowheader"
+                      aria-colindex={1}
                     >
-                      {preview.className ? (
-                        <span className={preview.className}>
-                          {preview.text}
-                        </span>
-                      ) : (
-                        preview.text
-                      )}
+                      <Checkbox
+                        aria-label={`Select row ${v.index + 1 + rowOffset}`}
+                        checked={rowSelected}
+                        onCheckedChange={(checked) => {
+                          setCopyState("");
+                          row.toggleSelected(checked);
+                        }}
+                      />
                     </div>
-                  );
-                })}
-              </div>
-            ))}
+                  ) : (
+                    <div className="row-number">{v.index + 1 + rowOffset}</div>
+                  )}
+                  {horizontal.getVirtualItems().map((c) => {
+                    const value = result.rows[v.index][c.index],
+                      column = result.columns[c.index],
+                      preview = cellPreview(column, value),
+                      selected =
+                        v.index >= minRow &&
+                        v.index <= maxRow &&
+                        c.index >= minCol &&
+                        c.index <= maxCol;
+                    const editor = editing?.inlineEditor;
+                    const editingCell =
+                      editor?.row === v.index && editor.column === c.index;
+                    return (
+                      <div
+                        id={`${gridId}-cell-${v.index}-${c.index}`}
+                        key={c.key}
+                        role="gridcell"
+                        aria-readonly={
+                          selectRows
+                            ? !editing?.canEdit(v.index, column.name)
+                            : undefined
+                        }
+                        data-staged={
+                          editing?.isStaged(v.index, column.name) || undefined
+                        }
+                        aria-colindex={c.index + 1 + Number(selectRows)}
+                        aria-selected={selected}
+                        className={`grid-cell ${selected ? "selected" : ""} ${value === null ? "null-value" : ""} ${isNumber(column) ? "number-value" : ""}`}
+                        style={{ left: c.start, width: c.size }}
+                        onPointerDown={(e) => {
+                          e.preventDefault();
+                          selecting.current = true;
+                          setEnd({ row: v.index, col: c.index });
+                          if (!e.shiftKey)
+                            setAnchor({ row: v.index, col: c.index });
+                          setCopyState("");
+                          scroll.current?.focus();
+                        }}
+                        onPointerEnter={(e) => {
+                          if (selecting.current && e.buttons === 1)
+                            setEnd({ row: v.index, col: c.index });
+                        }}
+                        onDoubleClick={() => activateCell(v.index, c.index)}
+                      >
+                        {editingCell ? (
+                          editor.content(() =>
+                            scroll.current?.focus({ preventScroll: true }),
+                          )
+                        ) : preview.className ? (
+                          <span className={preview.className}>
+                            {preview.text}
+                          </span>
+                        ) : (
+                          preview.text
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
           </div>
           {!result.rows.length && (
             <div className="empty-result">
@@ -568,7 +783,7 @@ export const ResultsGrid = memo(function ResultsGrid({
             </div>
           )}
         </div>
-        {inspect && result.rows[end.row] && (
+        {inspect && !editing?.reviewOpen && result.rows[end.row] && (
           <aside className="cell-inspector" aria-label="Row inspector">
             <div className="inspector-heading">
               <strong>Row {(end.row + 1 + rowOffset).toLocaleString()}</strong>
