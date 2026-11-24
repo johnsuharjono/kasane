@@ -6,8 +6,17 @@ import {
   type ReactNode,
 } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { Monitor, Moon, Sun } from "lucide-react";
 import { native } from "./api";
-export type Appearance = "system" | "light" | "dark";
+import { usePreferences, type AppPalette } from "./preferences";
+
+export const appearanceOptions = {
+  system: { value: "system", label: "System", icon: Monitor },
+  light: { value: "light", label: "Light", icon: Sun },
+  dark: { value: "dark", label: "Dark", icon: Moon },
+} as const;
+
+export type Appearance = keyof typeof appearanceOptions;
 const key = "kasane.appearance";
 function stored(): Appearance {
   try {
@@ -17,16 +26,24 @@ function stored(): Appearance {
     return "system";
   }
 }
+const systemDark = "(prefers-color-scheme: dark)";
+
+function applyScheme(appearance: Appearance, prefersDark: boolean) {
+  const dark =
+    appearance === "dark" || (appearance === "system" && prefersDark);
+  const scheme = dark ? "dark" : "light";
+  document.documentElement.classList.toggle("dark", dark);
+  document.documentElement.style.colorScheme = scheme;
+  return scheme;
+}
+
+function applyPalette(appPalette: AppPalette) {
+  document.documentElement.dataset.palette = appPalette;
+}
+
 export function initializeAppearance() {
-  const choice = stored();
-  document.documentElement.classList.toggle(
-    "dark",
-    choice === "dark" ||
-      (choice === "system" &&
-        matchMedia("(prefers-color-scheme: dark)").matches),
-  );
-  document.documentElement.style.colorScheme =
-    document.documentElement.classList.contains("dark") ? "dark" : "light";
+  applyScheme(stored(), matchMedia(systemDark).matches);
+  applyPalette(usePreferences.getState().appPalette);
 }
 const Context = createContext<{
   appearance: Appearance;
@@ -35,18 +52,13 @@ const Context = createContext<{
 }>({ appearance: "system", resolved: "light", setAppearance: () => {} });
 export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [appearance, setChoice] = useState<Appearance>(stored);
+  const appPalette = usePreferences((state) => state.appPalette);
   const [resolved, setResolved] = useState<"dark" | "light">(() =>
     document.documentElement.classList.contains("dark") ? "dark" : "light",
   );
   useLayoutEffect(() => {
-    const media = matchMedia("(prefers-color-scheme: dark)");
-    const apply = () => {
-      const dark =
-        appearance === "dark" || (appearance === "system" && media.matches);
-      document.documentElement.classList.toggle("dark", dark);
-      document.documentElement.style.colorScheme = dark ? "dark" : "light";
-      setResolved(dark ? "dark" : "light");
-    };
+    const media = matchMedia(systemDark);
+    const apply = () => setResolved(applyScheme(appearance, media.matches));
     apply();
     media.addEventListener("change", apply);
     if (native)
@@ -57,6 +69,9 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
         );
     return () => media.removeEventListener("change", apply);
   }, [appearance]);
+  useLayoutEffect(() => {
+    applyPalette(appPalette);
+  }, [appPalette]);
   return (
     <Context.Provider
       value={{

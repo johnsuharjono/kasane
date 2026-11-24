@@ -1,14 +1,16 @@
-import { usePreferences } from "../preferences";
+import { Radio } from "@base-ui/react/radio";
+import { RadioGroup } from "@base-ui/react/radio-group";
+import { appPalettes, usePreferences } from "../preferences";
 import { SelectField } from "./SelectField";
 import { Checkbox } from "./ui/checkbox";
-import { Monitor, Moon, Sun } from "lucide-react";
 import {
   Dialog,
   DialogContent,
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog";
-import { useAppearance, type Appearance } from "../appearance";
+import { appearanceOptions, useAppearance } from "../appearance";
+
 export function SettingsDialog({
   open,
   onOpenChange,
@@ -23,57 +25,61 @@ export function SettingsDialog({
       <DialogContent className="sm:max-w-[560px] max-h-[85vh] overflow-y-auto">
         <DialogTitle>Settings</DialogTitle>
         <DialogDescription>Preferences for this Mac.</DialogDescription>
-        <section className="space-y-3 py-3">
-          <h3 className="text-sm font-medium">Appearance</h3>
-          <div
-            role="radiogroup"
-            aria-label="Appearance"
-            className="grid grid-cols-3 gap-3"
-          >
-            {(
-              [
-                { value: "system", label: "System", icon: Monitor },
-                { value: "light", label: "Light", icon: Sun },
-                { value: "dark", label: "Dark", icon: Moon },
-              ] as const
-            ).map(({ value, label, icon: Icon }) => (
-              <button
-                key={value}
-                role="radio"
-                aria-checked={appearance === value}
-                onClick={() => setAppearance(value as Appearance)}
-                className="flex flex-col items-center gap-3 rounded-lg border border-input p-4 text-sm text-muted-foreground outline-none hover:bg-accent aria-checked:border-primary aria-checked:bg-accent aria-checked:text-accent-foreground focus-visible:ring-2 focus-visible:ring-ring"
-              >
-                <Icon size={22} />
-                {label}
-              </button>
-            ))}
+        <section className="settings-section space-y-4">
+          <div>
+            <h3 id="settings-color-scheme">Color scheme</h3>
+            <RadioGroup
+              aria-labelledby="settings-color-scheme"
+              className="grid grid-cols-3 gap-2"
+              value={appearance}
+              onValueChange={setAppearance}
+            >
+              {Object.values(appearanceOptions).map(
+                ({ value, label, icon: Icon }) => (
+                  <Radio.Root
+                    key={value}
+                    value={value}
+                    className="appearance-option flex items-center justify-center gap-1.5 p-2"
+                  >
+                    <Icon size={15} aria-hidden="true" />
+                    {label}
+                  </Radio.Root>
+                ),
+              )}
+            </RadioGroup>
           </div>
-          <p className="text-xs text-muted-foreground">
-            System follows your macOS appearance.
-          </p>
-        </section>
-        <section className="settings-section">
-          <h3>Table browsing</h3>
-          <label className="settings-row">
-            <div>
-              <strong>Load table data on open</strong>
-              <p>Turn off to fetch only when you click Refresh.</p>
-            </div>
-            <Checkbox
-              checked={preferences.autoPreview}
-              onCheckedChange={(autoPreview) =>
-                preferences.update({ autoPreview })
-              }
-            />
-          </label>
+          <div>
+            <h3 id="settings-app-theme">App theme</h3>
+            <RadioGroup
+              aria-labelledby="settings-app-theme"
+              className="grid grid-cols-2 gap-2 sm:grid-cols-4"
+              value={preferences.appPalette}
+              onValueChange={(appPalette) => preferences.update({ appPalette })}
+            >
+              {appPalettes.map(({ value, label }) => (
+                <Radio.Root
+                  key={value}
+                  value={value}
+                  className="appearance-option grid gap-2 p-2"
+                >
+                  <span className="grid grid-cols-2 gap-1" aria-hidden="true">
+                    <span className="palette-sample" data-palette={value} />
+                    <span
+                      className="palette-sample palette-sample--dark"
+                      data-palette={value}
+                    />
+                  </span>
+                  <span className="px-1">{label}</span>
+                </Radio.Root>
+              ))}
+            </RadioGroup>
+          </div>
         </section>
         <section className="settings-section">
           <h3>SQL editor</h3>
           <div className="settings-row">
             <div>
               <strong>Font size</strong>
-              <p>Applies to queries and notebook SQL cells.</p>
             </div>
             <SelectField
               label="Editor font size"
@@ -98,6 +104,21 @@ export function SettingsDialog({
               checked={preferences.lineWrapping}
               onCheckedChange={(lineWrapping) =>
                 preferences.update({ lineWrapping })
+              }
+            />
+          </label>
+        </section>
+        <section className="settings-section">
+          <h3>Table browsing</h3>
+          <label className="settings-row">
+            <div>
+              <strong>Load table data on open</strong>
+              <p>Turn off to fetch only when you click Refresh.</p>
+            </div>
+            <Checkbox
+              checked={preferences.autoPreview}
+              onCheckedChange={(autoPreview) =>
+                preferences.update({ autoPreview })
               }
             />
           </label>

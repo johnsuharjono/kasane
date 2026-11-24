@@ -17,6 +17,22 @@ import { Prec, type EditorState } from "@codemirror/state";
 import { keymap, EditorView, placeholder, tooltips } from "@codemirror/view";
 import type { Relation } from "../types";
 
+const appSqlHighlighting = syntaxHighlighting(
+  HighlightStyle.define([
+    { tag: tags.keyword, color: "var(--syntax-keyword)" },
+    {
+      tag: [tags.string, tags.special(tags.string)],
+      color: "var(--syntax-string)",
+    },
+    { tag: [tags.number, tags.bool, tags.null], color: "var(--syntax-number)" },
+    { tag: tags.comment, color: "var(--syntax-comment)" },
+    {
+      tag: [tags.name, tags.operator, tags.punctuation],
+      color: "var(--foreground)",
+    },
+  ]),
+);
+
 function statementAtCursor({ doc, selection }: EditorState) {
   const cursor = selection.main.head;
   const line = doc.lineAt(cursor);
@@ -86,23 +102,37 @@ export function SqlEditor({
   );
   const { resolved } = useAppearance();
   const { editorFontSize, lineWrapping } = usePreferences();
-  const editorTheme = useMemo(
-    () =>
+  const theme = useMemo(
+    () => [
       EditorView.theme(
         {
           "&": {
             backgroundColor: "var(--background)",
             color: "var(--foreground)",
           },
+          ".cm-content": { caretColor: "var(--ring)" },
           ".cm-cursor": { borderLeftColor: "var(--foreground)" },
-          ".cm-tooltip": {
-            backgroundColor: "var(--popover)",
-            color: "var(--popover-foreground)",
-            borderColor: "var(--border)",
+          ".cm-gutters": {
+            backgroundColor: "transparent",
+            border: "none",
+            color: "var(--muted-foreground)",
+          },
+          ".cm-activeLine, .cm-activeLineGutter": {
+            backgroundColor: "transparent",
+          },
+          "&.cm-focused .cm-activeLine": {
+            backgroundColor:
+              "color-mix(in srgb, var(--foreground) 5%, transparent)",
+          },
+          ".cm-placeholder": { color: "var(--muted-foreground)" },
+          ".cm-selectionBackground": {
+            backgroundColor: "var(--accent) !important",
           },
         },
         { dark: resolved === "dark" },
       ),
+      appSqlHighlighting,
+    ],
     [resolved],
   );
   const completion = useMemo(() => sqlCompletion(catalog), [catalog]);
@@ -110,24 +140,6 @@ export function SqlEditor({
     () => [
       tooltips({ parent: document.body, position: "fixed" }),
       ...(lineWrapping ? [EditorView.lineWrapping] : []),
-      syntaxHighlighting(
-        HighlightStyle.define([
-          { tag: tags.keyword, color: "var(--syntax-keyword)" },
-          {
-            tag: [tags.string, tags.special(tags.string)],
-            color: "var(--syntax-string)",
-          },
-          {
-            tag: [tags.number, tags.bool, tags.null],
-            color: "var(--syntax-number)",
-          },
-          { tag: tags.comment, color: "var(--syntax-comment)" },
-          {
-            tag: [tags.name, tags.operator, tags.punctuation],
-            color: "var(--foreground)",
-          },
-        ]),
-      ),
       PostgreSQL.extension,
       completion,
       sqlCompletionTheme,
@@ -146,29 +158,16 @@ export function SqlEditor({
       EditorView.theme({
         "&": {
           fontSize: `${editorFontSize}px`,
-          backgroundColor: "transparent",
         },
         ".cm-content": {
-          fontFamily: '"SF Mono", Menlo, monospace',
           padding: "16px 0",
           minHeight: fill ? "0" : compact ? "100px" : "200px",
         },
-        ".cm-gutters": {
-          backgroundColor: "transparent",
-          border: "none",
-          color: "var(--muted-foreground)",
-        },
-        ".cm-activeLine": { backgroundColor: "transparent" },
-        "&.cm-focused .cm-activeLine": {
-          backgroundColor:
-            "color-mix(in srgb, var(--foreground) 5%, transparent)",
-        },
-        ".cm-activeLineGutter": { backgroundColor: "transparent" },
-        ".cm-placeholder": { color: "var(--muted-foreground)" },
         "&.cm-focused": { outline: "none" },
-        ".cm-scroller": { overflow: "auto" },
-        ".cm-selectionBackground": {
-          backgroundColor: "var(--accent) !important",
+        ".cm-scroller": {
+          fontFamily: "var(--mono)",
+          fontVariantLigatures: "none",
+          overflow: "auto",
         },
       }),
     ],
@@ -194,7 +193,8 @@ export function SqlEditor({
         e.stopPropagation();
         onCommandMode();
       }}
-      theme={editorTheme}
+      className="sql-editor"
+      theme={theme}
       value={value}
       onChange={onChange}
       extensions={extensions}
