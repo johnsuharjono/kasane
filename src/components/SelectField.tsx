@@ -1,3 +1,4 @@
+import type { ComponentProps } from "react";
 import {
   Select,
   SelectTrigger,
@@ -12,6 +13,7 @@ export function SelectField({
   options,
   disabled,
   className,
+  portalContainer,
 }: {
   label: string;
   value: string;
@@ -19,6 +21,7 @@ export function SelectField({
   options: { value: string; label: string }[];
   disabled?: boolean;
   className?: string;
+  portalContainer?: ComponentProps<typeof SelectContent>["portalContainer"];
 }) {
   const items = Object.fromEntries(options.map((o) => [o.value, o.label]));
   return (
@@ -31,7 +34,11 @@ export function SelectField({
       <SelectTrigger aria-label={label} className={className} size="sm">
         <SelectValue />
       </SelectTrigger>
-      <SelectContent alignItemWithTrigger={false} align="start">
+      <SelectContent
+        alignItemWithTrigger={false}
+        align="start"
+        portalContainer={portalContainer}
+      >
         {options.map((o) => (
           <SelectItem key={o.value} value={o.value}>
             {o.label}

@@ -1,6 +1,7 @@
 mod db;
 mod menu;
 mod sql_documents;
+mod table_edits;
 use db::{
     Connection, DbError, ForeignKey, QueryResult, RelationStructure, Session, CONNECTION_COLORS,
 };
@@ -179,6 +180,19 @@ async fn execute_sql(
     session(&state, &session_id)
         .await?
         .execute(&request_id, &sql)
+        .await
+}
+#[tauri::command]
+async fn apply_table_updates(
+    state: State<'_, AppState>,
+    session_id: String,
+    schema: String,
+    relation: String,
+    rows: Vec<table_edits::RowUpdate>,
+) -> Result<(), DbError> {
+    session(&state, &session_id)
+        .await?
+        .apply_table_updates(&schema, &relation, rows)
         .await
 }
 #[tauri::command]
@@ -433,6 +447,7 @@ pub fn run() {
             open_session,
             close_session,
             execute_sql,
+            apply_table_updates,
             cancel_query,
             get_catalog,
             get_schema_foreign_keys,

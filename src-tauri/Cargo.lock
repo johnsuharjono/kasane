@@ -1913,6 +1913,7 @@ dependencies = [
 name = "kasane"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "futures-util",
  "native-tls",
  "postgres-native-tls",

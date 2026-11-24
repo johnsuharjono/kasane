@@ -172,10 +172,9 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
       page.getByRole("combobox", { name: "Document connection" }),
     ).toHaveCount(0);
     await page.getByRole("button", { name: /^id/ }).click();
-    await expect(page.getByRole("columnheader").first()).toHaveAttribute(
-      "aria-sort",
-      "ascending",
-    );
+    await expect(
+      page.getByRole("columnheader").filter({ hasText: /^id/ }),
+    ).toHaveAttribute("aria-sort", "ascending");
     await expect(page.getByRole("gridcell").first()).toHaveText("1");
     await page.getByRole("button", { name: /^id/ }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("1000");
@@ -193,6 +192,9 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
     await page.getByRole("button", { name: "Apply", exact: true }).click();
     await expect(page.getByRole("gridcell").first()).toHaveText("99");
     await expect(page.locator(".result-status")).toContainText("1 returned");
+    await page
+      .getByRole("button", { name: "Filter rows", exact: true })
+      .click();
     await page
       .getByLabel("Filter value")
       .fill("x'); DROP TABLE commerce.customers; --");
@@ -286,11 +288,35 @@ test("connect → browse → query → notebook save/reopen, wide grid and edito
       secondStatement,
       firstStatement,
     ]);
-    await replaceEditor(editor, "SELECT * FROM commerce.cus");
+    const suggestions = page.locator(".cm-tooltip-autocomplete");
+    await replaceEditor(editor, "SELECT * FROM commerce.pro");
     await editor.press("Control+Space");
-    await expect(page.locator(".cm-tooltip-autocomplete")).toContainText(
-      "customers",
+    await expect(suggestions).toContainText("Tables & views");
+    await expect(suggestions.getByRole("option")).toHaveCount(1);
+    await expect(
+      suggestions.getByRole("option", { name: /products/ }),
+    ).toBeVisible();
+    await expect(suggestions.locator(".cm-completionIcon")).toHaveCount(0);
+    await editor.press("Escape");
+
+    await replaceEditor(
+      editor,
+      "SELECT * FROM commerce.customers AS c WHERE c.em",
     );
+    await editor.press("Control+Space");
+    await expect(suggestions).toContainText("Columns");
+    await expect(suggestions.getByRole("option")).toHaveCount(1);
+    await expect(
+      suggestions.getByRole("option", { name: /email.*text/ }),
+    ).toBeVisible();
+    await editor.press("Escape");
+
+    await replaceEditor(editor, "SELECT SU");
+    await editor.press("Control+Space");
+    await expect(suggestions).toContainText("Functions");
+    await expect(
+      suggestions.getByRole("option", { name: "SUM", exact: true }),
+    ).toBeVisible();
     await editor.press("Escape");
     await replaceEditor(
       editor,

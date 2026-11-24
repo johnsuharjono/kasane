@@ -1,30 +1,49 @@
 import { quoteIdent } from "./api";
-import type { Relation, TableSettings } from "./types";
-export const defaultTableSettings: TableSettings = {
-  page: 0,
-  filterColumn: "",
-  filterOperator: "contains",
-  filterValue: "",
-};
+import type { Relation, TableFilter, TableSettings } from "./types";
+export const defaultTableSettings: TableSettings = { page: 0 };
+
 // E-strings explicitly escape both backslashes and quotes, independent of standard_conforming_strings.
 const literal = (v: string) =>
   `E'${v.replaceAll("\\", "\\\\").replaceAll("'", "''")}'`;
-function tableSource(relation: Relation, settings: TableSettings): string {
-  let query = `FROM ${quoteIdent(relation.schema)}.${quoteIdent(relation.name)}`;
-  const column = relation.columns.find((c) => c.name === settings.filterColumn);
-  if (column) {
-    const name = quoteIdent(column.name);
-    if (settings.filterOperator === "is-null")
-      query += ` WHERE ${name} IS NULL`;
-    else if (settings.filterValue !== "")
-      query +=
-        settings.filterOperator === "equals"
-          ? ` WHERE ${name}::text = ${literal(settings.filterValue)}`
-          : ` WHERE strpos(lower(${name}::text), lower(${literal(settings.filterValue)})) > 0`;
-  }
-  return query;
+export function activeTableFilters(
+  relation: Relation,
+  settings: TableSettings,
+): TableFilter[] {
+  const { filterColumn, filterOperator, filterValue } = settings;
+  const legacy =
+    filterColumn &&
+    filterOperator &&
+    (filterOperator === "is-null" || filterValue)
+      ? [
+          {
+            column: filterColumn,
+            operator: filterOperator,
+            value: filterValue ?? "",
+          },
+        ]
+      : [];
+  return (settings.filters ?? legacy).filter((filter) =>
+    relation.columns.some((column) => column.name === filter.column),
+  );
 }
-export const TABLE_PAGE_SIZE = 500;
+
+function tableSource(relation: Relation, settings: TableSettings): string {
+  const source = `FROM ${quoteIdent(relation.schema)}.${quoteIdent(relation.name)}`;
+  const conditions = activeTableFilters(relation, settings).map(
+    ({ column, operator, value }) => {
+      const name = quoteIdent(column);
+      if (operator === "is-null") return `${name} IS NULL`;
+      if (operator === "equals") return `${name}::text = ${literal(value)}`;
+      return `strpos(lower(${name}::text), lower(${literal(value)})) > 0`;
+    },
+  );
+  return conditions.length
+    ? `${source} WHERE ${conditions.join(" AND ")}`
+    : source;
+}
+export const TABLE_PAGE_SIZES: readonly number[] = [25, 50, 100, 250, 500];
+export const pageSizeFor = ({ pageSize }: TableSettings) =>
+  pageSize !== undefined && TABLE_PAGE_SIZES.includes(pageSize) ? pageSize : 50;
 export const pageFor = (settings: TableSettings) =>
   Number.isSafeInteger(settings.page) && settings.page! >= 0
     ? Math.min(settings.page!, 1_000_000)
@@ -35,9 +54,15 @@ export function tableCountQuery(
 ): string {
   return `SELECT count(*)::text AS total ${tableSource(relation, settings)};`;
 }
+export const tablePrimaryKey = (relation: Relation) =>
+  relation.columns
+    .filter((column) => column.primaryKeyPosition !== undefined)
+    .sort((a, b) => a.primaryKeyPosition! - b.primaryKeyPosition!);
+
 export function tableQuery(
   relation: Relation,
   settings: TableSettings,
+  captureRows = false,
 ): string {
   const hidden = new Set(settings.hiddenColumns ?? []);
   const visible = relation.columns.filter((c) => !hidden.has(c.name));
@@ -45,10 +70,12 @@ export function tableQuery(
     hidden.size && visible.length
       ? visible.map((c) => quoteIdent(c.name)).join(", ")
       : "*";
-  let query = `SELECT ${list} ${tableSource(relation, settings)}`;
-  const primaryKey = relation.columns
-    .filter((c) => c.primaryKeyPosition !== undefined)
-    .sort((a, b) => a.primaryKeyPosition! - b.primaryKeyPosition!);
+  const primaryKey = tablePrimaryKey(relation);
+  // The trailing identity fields are stripped before the result reaches the grid.
+  const identity = captureRows
+    ? `, ${primaryKey.map((column) => quoteIdent(column.name)).join(", ")}, tableoid::text, ctid::text, xmin::text`
+    : "";
+  let query = `SELECT ${list}${identity} ${tableSource(relation, settings)}`;
   const order: string[] = [];
   if (
     settings.sort &&
@@ -72,8 +99,6 @@ export function tableQuery(
     }
   }
   if (order.length) query += ` ORDER BY ${order.join(", ")}`;
-  return (
-    query +
-    ` LIMIT ${TABLE_PAGE_SIZE + 1} OFFSET ${pageFor(settings) * TABLE_PAGE_SIZE};`
-  );
+  const pageSize = pageSizeFor(settings);
+  return `${query} LIMIT ${pageSize + 1} OFFSET ${pageFor(settings) * pageSize};`;
 }

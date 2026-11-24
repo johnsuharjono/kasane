@@ -11,7 +11,8 @@ import {
   type Ref,
 } from "react";
 import CodeMirror from "@uiw/react-codemirror";
-import { PostgreSQL, sql } from "@codemirror/lang-sql";
+import { PostgreSQL } from "@codemirror/lang-sql";
+import { sqlCompletion, sqlCompletionTheme } from "../sql-completion";
 import { Prec, type EditorState } from "@codemirror/state";
 import { keymap, EditorView, placeholder, tooltips } from "@codemirror/view";
 import type { Relation } from "../types";
@@ -104,13 +105,7 @@ export function SqlEditor({
       ),
     [resolved],
   );
-  const schema = useMemo(() => {
-    const namespaces: Record<string, Record<string, string[]>> = {};
-    catalog.forEach((r) => {
-      (namespaces[r.schema] ??= {})[r.name] = r.columns.map((c) => c.name);
-    });
-    return namespaces;
-  }, [catalog]);
+  const completion = useMemo(() => sqlCompletion(catalog), [catalog]);
   const extensions = useMemo(
     () => [
       tooltips({ parent: document.body, position: "fixed" }),
@@ -133,12 +128,9 @@ export function SqlEditor({
           },
         ]),
       ),
-      sql({
-        dialect: PostgreSQL,
-        schema,
-        defaultSchema: "public",
-        upperCaseKeywords: true,
-      }),
+      PostgreSQL.extension,
+      completion,
+      sqlCompletionTheme,
       placeholder("Write SQL…  ⌘↵ to run"),
       Prec.highest(
         keymap.of([
@@ -180,7 +172,7 @@ export function SqlEditor({
         },
       }),
     ],
-    [schema, run, compact, fill, editorFontSize, lineWrapping],
+    [completion, run, compact, fill, editorFontSize, lineWrapping],
   );
   return (
     <CodeMirror
@@ -209,7 +201,7 @@ export function SqlEditor({
       basicSetup={{
         foldGutter: false,
         highlightActiveLine: true,
-        autocompletion: true,
+        autocompletion: false,
       }}
       height={fill ? "100%" : undefined}
       maxHeight={fill ? "100%" : compact ? "340px" : "400px"}
