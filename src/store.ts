@@ -29,6 +29,7 @@ type Workspace = {
   open: (notebook: Notebook) => void;
   openSQL: (document: SQLDocument) => void;
   activate: (id: string) => void;
+  moveTab: (id: string, targetId: string) => void;
   patch: (id: string, fn: (tab: Tab) => Tab) => void;
   close: (id: string) => void;
   editCell: (id: string, cellId: string, source: string) => void;
@@ -171,6 +172,29 @@ export const useWorkspace = create<Workspace>()(
         }));
       },
       activate: (activeId) => set({ activeId }),
+      moveTab: (id, targetId) => {
+        if (id === targetId) return;
+        set((s) => {
+          const source = s.tabs.find((tab) => tab.id === id);
+          const target = s.tabs.find((tab) => tab.id === targetId);
+          if (!source || !target || source.connectionId !== target.connectionId)
+            return s;
+
+          const group = s.tabs.filter(
+            (tab) => tab.connectionId === source.connectionId,
+          );
+          const index = group.indexOf(target);
+          group.splice(group.indexOf(source), 1);
+          group.splice(index, 0, source);
+
+          let next = 0;
+          return {
+            tabs: s.tabs.map((tab) =>
+              tab.connectionId === source.connectionId ? group[next++] : tab,
+            ),
+          };
+        });
+      },
       patch: (id, fn) =>
         set((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? fn(t) : t)) })),
       close: (id) =>

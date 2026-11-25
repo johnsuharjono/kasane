@@ -186,7 +186,7 @@ test("table pages, filtered counts, preferences and content-sized notebook resul
     await expect(page.locator(".page-range")).toHaveText("1–500 of 1,000 rows");
 
     const action = await page
-      .getByRole("button", { name: "Import SQL", exact: true })
+      .getByRole("button", { name: "New document", exact: true })
       .boundingBox();
     const bar = await page
       .getByRole("navigation", { name: "Open documents", exact: true })

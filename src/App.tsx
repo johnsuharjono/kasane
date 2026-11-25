@@ -1,3 +1,16 @@
+import {
+  closestCenter,
+  DndContext,
+  DragOverlay,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from "@dnd-kit/core";
+import {
+  horizontalListSortingStrategy,
+  SortableContext,
+} from "@dnd-kit/sortable";
+import { SortableWorkspaceTab } from "./components/SortableWorkspaceTab";
 import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
 import { SettingsDialog } from "./components/SettingsDialog";
 import {
@@ -57,7 +70,7 @@ import { appearanceOptions, useAppearance } from "./appearance";
 import { connectionColor } from "./connection-colors";
 import { useDelayed } from "./use-delayed";
 import {
-  FolderOpen,
+  List,
   BookOpen,
   BookPlus,
   FilePlus2,
@@ -125,6 +138,7 @@ export default function App() {
     openSQL,
     openDiagram,
     activate,
+    moveTab,
     patch,
     close,
     editCell,
@@ -162,8 +176,15 @@ export default function App() {
     kind: "sql" | "notebook";
     title: string;
   }>();
-  const [hiddenTabs, setHiddenTabs] = useState<string[]>([]);
+  const [tabsOverflow, setTabsOverflow] = useState(false);
+  const [draggedTabId, setDraggedTabId] = useState<string>();
   const tabStrip = useRef<HTMLElement>(null);
+  const tabPointerDragged = useRef(false);
+  const tabSensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: { distance: 5 },
+    }),
+  );
   const { appearance, resolved: theme, setAppearance } = useAppearance();
   const { icon: AppearanceIcon, label: appearanceLabel } =
     appearanceOptions[appearance];
@@ -172,6 +193,8 @@ export default function App() {
   const setSearch = (search: string) =>
     setExplorer(selected, { ...explorerState, search });
   const visibleTabs = tabs.filter((t) => t.connectionId === connectionId);
+  const tabOrder = visibleTabs.map(({ id }) => id).join("\0");
+  const draggedTab = visibleTabs.find((t) => t.id === draggedTabId);
   const visibleSQL = sqlDocuments.filter(
     (d) => d.connectionId === connectionId,
   );
@@ -205,7 +228,10 @@ export default function App() {
     Number(localStorage.getItem("kasane.sidebarWidth")) || 252,
   );
   const busy = useRef(new Set<string>());
-  const [discardTableTab, setDiscardTableTab] = useState<string>();
+  const [closePrompt, setClosePrompt] = useState<{
+    id: string;
+    kind: "table" | "document";
+  }>();
   const queryRequests = useRef(
     new Map<string, { cancelled: boolean; sessionId?: string }>(),
   );
@@ -760,22 +786,27 @@ export default function App() {
       setNotice(asError(e).message);
     }
   }
-  async function closeTab(t: Tab, discardEdits = false) {
+  async function closeTab(t: Tab, action: "ask" | "discard" | "save" = "ask") {
     if (t.tableEdit?.applying) {
       setNotice(
         "Wait for table changes to finish applying before closing this tab.",
       );
       return;
     }
-    if (t.tableEdit?.rows.length && !discardEdits) {
-      setDiscardTableTab(t.id);
+    if (t.tableEdit?.rows.length && action === "ask") {
+      setClosePrompt({ id: t.id, kind: "table" });
       return;
     }
     if (Object.values(t.executions).some((e) => e.state === "running")) {
       setNotice("Cancel the running query before closing this tab.");
       return;
     }
-    if ((t.kind === "notebook" || !t.relation) && t.dirty) {
+    const isDirtyDocument = !t.relation && t.kind !== "diagram" && t.dirty;
+    if (isDirtyDocument && action === "ask") {
+      setClosePrompt({ id: t.id, kind: "document" });
+      return;
+    }
+    if (isDirtyDocument && action === "save") {
       await save(t);
       if (useWorkspace.getState().tabs.find((x) => x.id === t.id)?.dirty)
         return;
@@ -783,6 +814,13 @@ export default function App() {
     stopTableCount(t.id);
     if (t.sessionId) await api.close(t.sessionId).catch(() => {});
     close(t.id);
+  }
+  function confirmClose(action: "discard" | "save") {
+    const document = useWorkspace
+      .getState()
+      .tabs.find((t) => t.id === closePrompt?.id);
+    setClosePrompt(undefined);
+    if (document) void closeTab(document, action);
   }
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
@@ -1159,38 +1197,32 @@ export default function App() {
   function refreshTable(t: Tab) {
     void runTable(t, t.tableSettings ?? defaultTableSettings, "refresh");
   }
-  // Tabs scroll horizontally; those outside the strip are listed in a "+N" menu.
+  useLayoutEffect(() => {
+    tabStrip.current
+      ?.querySelector<HTMLElement>(
+        `[data-tab-id="${CSS.escape(activeId ?? "")}"]`,
+      )
+      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId, sidebar]);
   useLayoutEffect(() => {
     const strip = tabStrip.current;
     if (!strip) return;
     const measure = () => {
-      const left = strip.scrollLeft,
-        right = left + strip.clientWidth;
-      const hidden: string[] = [];
-      for (const el of strip.querySelectorAll<HTMLElement>("[data-tab-id]"))
-        if (
-          el.offsetLeft < left - 1 ||
-          el.offsetLeft + el.offsetWidth > right + 1
-        )
-          hidden.push(el.dataset.tabId!);
-      setHiddenTabs((old) =>
-        old.join("\0") === hidden.join("\0") ? old : hidden,
+      // The offsets reflect the layout even while dnd-kit transforms the cards.
+      const last = strip.lastElementChild as HTMLElement | null;
+      setTabsOverflow(
+        Boolean(
+          last && last.offsetLeft + last.offsetWidth > strip.clientWidth + 1,
+        ),
       );
     };
-    strip
-      .querySelector<HTMLElement>(
-        `[data-tab-id="${CSS.escape(activeId ?? "")}"]`,
-      )
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" });
     measure();
-    const observer = new ResizeObserver(() => requestAnimationFrame(measure));
+    const observer = new ResizeObserver(measure);
     observer.observe(strip);
-    strip.addEventListener("scroll", measure, { passive: true });
-    return () => {
-      observer.disconnect();
-      strip.removeEventListener("scroll", measure);
-    };
-  }, [activeId, visibleTabs.length, sidebar]);
+    for (const card of strip.querySelectorAll("[data-tab-id]"))
+      observer.observe(card);
+    return () => observer.disconnect();
+  }, [tabOrder]);
   const query = search.toLowerCase();
   const allDocuments = [
     ...visibleSQL.map((d) => ({
@@ -1294,6 +1326,16 @@ export default function App() {
     ) : (
       <BookOpen size={14} aria-hidden="true" />
     );
+  const tabLabel = (t: Tab) => (
+    <>
+      {tabIcon(t)}
+      <span>{t.title}</span>
+      <TabStatus
+        running={Object.values(t.executions).some((e) => e.state === "running")}
+        dirty={t.dirty && !t.relation}
+      />
+    </>
+  );
   return (
     <div className={`app ${sidebar ? "" : "sidebar-hidden"}`}>
       <header className="titlebar" data-tauri-drag-region>
@@ -1306,60 +1348,89 @@ export default function App() {
         >
           <PanelLeft size={16} />
         </Button>
-        <nav className="tabbar" aria-label="Open documents" ref={tabStrip}>
-          {visibleTabs.map((t) => {
-            const tabRunning = Object.values(t.executions).some(
-              (e) => e.state === "running",
-            );
-            return (
-              <div
-                key={t.id}
-                data-tab-id={t.id}
-                className={`tab ${activeId === t.id ? "active" : ""}`}
-              >
-                <button onClick={() => activate(t.id)}>
-                  {tabIcon(t)}
-                  <span>{t.title}</span>
-                  <TabStatus
-                    running={tabRunning}
-                    dirty={t.dirty && !t.relation}
-                  />
-                </button>
-                <Button
-                  className="quiet icon"
-                  aria-label={`Close ${t.title}`}
-                  onClick={() => closeTab(t)}
-                >
-                  <X size={12} />
-                </Button>
-              </div>
-            );
-          })}
-        </nav>
-        {hiddenTabs.length > 0 && (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={
-                <Button
-                  className="quiet small tab-overflow"
-                  aria-label={`${hiddenTabs.length} more tabs`}
-                />
+        <DndContext
+          sensors={tabSensors}
+          collisionDetection={closestCenter}
+          autoScroll={{ canScroll: (element) => element === tabStrip.current }}
+          accessibility={{
+            screenReaderInstructions: {
+              draggable:
+                "Press Alt and the Left or Right Arrow key to move the focused tab.",
+            },
+          }}
+          onDragStart={({ active }) => {
+            tabPointerDragged.current = true;
+            setDraggedTabId(String(active.id));
+          }}
+          onDragCancel={() => setDraggedTabId(undefined)}
+          onDragEnd={({ active, over }) => {
+            setDraggedTabId(undefined);
+            if (over) moveTab(String(active.id), String(over.id));
+          }}
+        >
+          <nav
+            className="tabbar"
+            aria-label="Open documents"
+            data-tauri-drag-region="false"
+            ref={tabStrip}
+            onPointerDownCapture={() => {
+              tabPointerDragged.current = false;
+            }}
+            onClickCapture={(event) => {
+              // A drag release can produce a click on a tab that slid under the pointer.
+              if (tabPointerDragged.current && event.detail > 0) {
+                event.preventDefault();
+                event.stopPropagation();
               }
+            }}
+          >
+            <SortableContext
+              items={visibleTabs.map((tab) => tab.id)}
+              strategy={horizontalListSortingStrategy}
             >
-              +{hiddenTabs.length}
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="start" className="min-w-56">
-              {visibleTabs
-                .filter((t) => hiddenTabs.includes(t.id))
-                .map((t) => (
-                  <DropdownMenuItem key={t.id} onClick={() => activate(t.id)}>
-                    {tabIcon(t)}
-                    {t.title}
-                  </DropdownMenuItem>
-                ))}
-            </DropdownMenuContent>
-          </DropdownMenu>
-        )}
+              {visibleTabs.map((t, index) => (
+                <SortableWorkspaceTab
+                  key={t.id}
+                  id={t.id}
+                  title={t.title}
+                  active={activeId === t.id}
+                  onActivate={() => activate(t.id)}
+                  onClose={() => closeTab(t)}
+                  onMove={(direction) => {
+                    const target = visibleTabs[index + direction];
+                    if (target) moveTab(t.id, target.id);
+                  }}
+                >
+                  {tabLabel(t)}
+                </SortableWorkspaceTab>
+              ))}
+            </SortableContext>
+          </nav>
+          <DragOverlay
+            dropAnimation={null}
+            style={{ pointerEvents: "none" }}
+            modifiers={[
+              ({ transform, draggingNodeRect }) => {
+                const strip = tabStrip.current?.getBoundingClientRect();
+                if (!strip || !draggingNodeRect) return transform;
+                const min = strip.left - draggingNodeRect.left;
+                const max = strip.right - draggingNodeRect.right;
+                return {
+                  ...transform,
+                  x: Math.max(min, Math.min(transform.x, max)),
+                  y: 0,
+                };
+              },
+            ]}
+          >
+            {draggedTab && (
+              <div className="tab tab-drag-preview" aria-hidden="true">
+                <span className="tab-drag-label">{tabLabel(draggedTab)}</span>
+                <X size={12} className="tab-drag-close" />
+              </div>
+            )}
+          </DragOverlay>
+        </DndContext>
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -1384,13 +1455,29 @@ export default function App() {
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <Button
-          className="quiet icon"
-          aria-label="Import SQL"
-          onClick={() => void openSQLFile()}
-        >
-          <FolderOpen size={15} />
-        </Button>
+        {visibleTabs.length > 0 && (
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  className={`quiet icon tab-overflow${tabsOverflow ? "" : " invisible"}`}
+                  aria-label="Show open tabs"
+                  title="Show open tabs"
+                />
+              }
+            >
+              <List size={15} aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="min-w-56">
+              {visibleTabs.map((t) => (
+                <DropdownMenuItem key={t.id} onClick={() => activate(t.id)}>
+                  {tabIcon(t)}
+                  {t.title}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         <span className="spacer" data-tauri-drag-region />
         <button
           className="command-trigger"
@@ -1581,26 +1668,14 @@ export default function App() {
                               ))}
                           </div>
                         </details>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger
-                            render={
-                              <Button
-                                className="quiet icon absolute top-0 right-px size-[25px] text-muted-foreground"
-                                aria-label={`Schema actions for ${schema}`}
-                                title="Schema actions"
-                              />
-                            }
-                          >
-                            <Network size={13} aria-hidden="true" />
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem
-                              onClick={() => openDiagram(selected, { schema })}
-                            >
-                              Open Diagram
-                            </DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                        <Button
+                          className="quiet icon absolute top-0 right-px size-[25px] text-muted-foreground"
+                          aria-label={`Open diagram for ${schema}`}
+                          title="Open schema diagram"
+                          onClick={() => openDiagram(selected, { schema })}
+                        >
+                          <Network size={13} aria-hidden="true" />
+                        </Button>
                       </div>
                     ))}
                     {!browseSession && (
@@ -1782,7 +1857,6 @@ export default function App() {
                   sessionId={browseSession}
                   connecting={connecting}
                   onRefresh={connect}
-                  onOpenTable={openTable}
                   onOpenSchema={() =>
                     openDiagram(selected, { schema: tab.diagram!.schema })
                   }
@@ -2316,32 +2390,37 @@ export default function App() {
         )}
       </div>
       <Dialog
-        open={!!discardTableTab}
+        open={!!closePrompt}
         onOpenChange={(open) => {
-          if (!open) setDiscardTableTab(undefined);
+          if (!open) setClosePrompt(undefined);
         }}
       >
-        <DialogContent className="confirm-dialog sm:max-w-[420px]">
-          <DialogTitle>Discard table edits?</DialogTitle>
+        <DialogContent
+          className="confirm-dialog sm:max-w-[470px]"
+          showCloseButton={false}
+        >
+          <DialogTitle>
+            {closePrompt?.kind === "table"
+              ? "Discard table edits?"
+              : `Save changes to “${tabs.find((t) => t.id === closePrompt?.id)?.title}”?`}
+          </DialogTitle>
           <DialogDescription>
-            Closing this tab will discard its staged changes.
+            {closePrompt?.kind === "table"
+              ? "Closing this tab will discard its staged changes."
+              : "Your unsaved changes will be lost if you discard them."}
           </DialogDescription>
           <div className="confirm-actions">
-            <Button onClick={() => setDiscardTableTab(undefined)}>
+            <Button autoFocus onClick={() => setClosePrompt(undefined)}>
               Keep editing
             </Button>
-            <Button
-              className="danger"
-              onClick={() => {
-                const document = useWorkspace
-                  .getState()
-                  .tabs.find((t) => t.id === discardTableTab);
-                setDiscardTableTab(undefined);
-                if (document) void closeTab(document, true);
-              }}
-            >
+            <Button className="danger" onClick={() => confirmClose("discard")}>
               Discard and close
             </Button>
+            {closePrompt?.kind === "document" && (
+              <Button className="primary" onClick={() => confirmClose("save")}>
+                Save and close
+              </Button>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -2460,6 +2539,7 @@ export default function App() {
                 ["⌘ / Ctrl + O", "Import SQL"],
                 ["⌘ / Ctrl + ,", "Settings"],
                 ["⌘ / Ctrl + W", "Close tab"],
+                ["Alt + ← / →", "Move the focused tab"],
                 ["⌘ / Ctrl + \\", "Toggle sidebar"],
               ].map(([key, label]) => (
                 <div key={key}>

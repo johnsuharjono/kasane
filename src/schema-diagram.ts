@@ -1,5 +1,11 @@
-import { MarkerType, type Edge, type Node } from "@xyflow/react";
-import ELK, { type ElkExtendedEdge, type ElkPort } from "elkjs/lib/elk-api.js";
+import {
+  MarkerType,
+  Position,
+  type Edge,
+  type Node,
+  type XYPosition,
+} from "@xyflow/react";
+import ELK, { type ElkExtendedEdge } from "elkjs/lib/elk-api.js";
 import layoutWorkerUrl from "elkjs/lib/elk-worker.min.js?url";
 import type { DiagramScope, ForeignKey, Relation } from "./types";
 
@@ -7,7 +13,6 @@ const elk = new ELK({ workerFactory: () => new Worker(layoutWorkerUrl) });
 const width = 244;
 const headerHeight = 42;
 const rowHeight = 25;
-const footerHeight = 34;
 
 type DiagramColumn = Relation["columns"][number] & {
   inbound: boolean;
@@ -21,7 +26,12 @@ export type TableNode = Node<
   },
   "table"
 >;
-export type DiagramEdge = Edge<{ path: string }, "foreignKey">;
+type TableHandle = NonNullable<TableNode["handles"]>[number] & { id: string };
+
+export type DiagramEdge = Edge<
+  { path?: string; offset?: XYPosition; detourY?: number },
+  "foreignKey"
+>;
 
 export const tableId = (schema: string, table: string) =>
   JSON.stringify([schema, table]);
@@ -94,7 +104,7 @@ export async function layoutDiagram(
     }
   }
 
-  const nodes: TableNode[] = [...tables]
+  const nodes = [...tables]
     .filter(([id]) => visible.has(id))
     .map(([id, relation]) => {
       const columns = relation.columns
@@ -111,12 +121,42 @@ export async function layoutDiagram(
             column.outbound,
         );
 
+      const handles: TableHandle[] = [];
+      columns.forEach((column, index) => {
+        const y = headerHeight + (index + 0.5) * rowHeight;
+        if (column.inbound) {
+          handles.push({
+            id: portId(id, column.name, "in"),
+            type: "target",
+            position: Position.Left,
+            x: 0,
+            y,
+            width: 0,
+            height: 0,
+          });
+        }
+        if (column.outbound) {
+          handles.push({
+            id: portId(id, column.name, "out"),
+            type: "source",
+            position: Position.Right,
+            x: width,
+            y,
+            width: 0,
+            height: 0,
+          });
+        }
+      });
+
+      const height = headerHeight + Math.max(columns.length, 1) * rowHeight;
       return {
         id,
         type: "table",
+        handles,
         width,
-        height:
-          headerHeight + Math.max(columns.length, 1) * rowHeight + footerHeight,
+        height,
+        measured: { width, height },
+        dragHandle: ".diagram-table-header",
         position: { x: 0, y: 0 },
         data: {
           relation,
@@ -124,7 +164,7 @@ export async function layoutDiagram(
           outsideSchema: relation.schema !== scope.schema,
         },
         ariaLabel: `${relation.schema}.${relation.name}`,
-      };
+      } satisfies TableNode;
     });
 
   if (!nodes.length) return { nodes, edges };
@@ -139,39 +179,22 @@ export async function layoutDiagram(
       "elk.layered.spacing.edgeNodeBetweenLayers": "22",
       "elk.layered.spacing.edgeEdgeBetweenLayers": "10",
     },
-    children: nodes.map((node) => {
-      const ports: ElkPort[] = [];
-      node.data.columns.forEach((column, index) => {
-        const y = headerHeight + (index + 0.5) * rowHeight;
-        if (column.inbound) {
-          ports.push({
-            id: portId(node.id, column.name, "in"),
-            x: 0,
-            y,
-            width: 0,
-            height: 0,
-            layoutOptions: { "elk.port.side": "WEST" },
-          });
-        }
-        if (column.outbound) {
-          ports.push({
-            id: portId(node.id, column.name, "out"),
-            x: width,
-            y,
-            width: 0,
-            height: 0,
-            layoutOptions: { "elk.port.side": "EAST" },
-          });
-        }
-      });
-      return {
-        id: node.id,
-        width: node.width,
-        height: node.height,
-        ports,
-        layoutOptions: { "elk.portConstraints": "FIXED_POS" },
-      };
-    }),
+    children: nodes.map((node) => ({
+      id: node.id,
+      width: node.width,
+      height: node.height,
+      ports: node.handles.map(({ id, x, y, width, height, position }) => ({
+        id,
+        x,
+        y,
+        width,
+        height,
+        layoutOptions: {
+          "elk.port.side": position === Position.Left ? "WEST" : "EAST",
+        },
+      })),
+      layoutOptions: { "elk.portConstraints": "FIXED_POS" },
+    })),
     edges: edges.map((edge) => ({
       id: edge.id,
       sources: [edge.sourceHandle!],
@@ -183,7 +206,7 @@ export async function layoutDiagram(
     layout.children?.map(({ id, x, y }) => [id, { x: x ?? 0, y: y ?? 0 }]),
   );
   const routes = new Map(
-    (layout.edges as ElkExtendedEdge[]).map(({ id, sections }) => [
+    ((layout.edges ?? []) as ElkExtendedEdge[]).map(({ id, sections }) => [
       id,
       sections
         ?.map(({ startPoint, bendPoints, endPoint }) =>

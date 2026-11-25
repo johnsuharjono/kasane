@@ -1,9 +1,10 @@
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Background,
   BackgroundVariant,
   BaseEdge,
   Controls,
+  getSmoothStepPath,
   Handle,
   Position,
   ReactFlow,
@@ -11,8 +12,9 @@ import {
   useReactFlow,
   type EdgeProps,
   type NodeProps,
+  type XYPosition,
 } from "@xyflow/react";
-import { KeyRound, Maximize, RefreshCw, Search, Table2 } from "lucide-react";
+import { Maximize, RefreshCw, Search, Table2 } from "lucide-react";
 import "@xyflow/react/dist/style.css";
 import "./schema-diagram.css";
 import { api } from "../api";
@@ -32,19 +34,15 @@ import {
 import { Button } from "./Button";
 import { Input } from "./ui/input";
 
-type OpenTable = (table: Relation, view: "data" | "structure") => void;
-const TableActions = createContext<OpenTable>(() => {});
-
 function DiagramTable({ id, data }: NodeProps<TableNode>) {
   const { relation, columns, outsideSchema } = data;
-  const open = useContext(TableActions);
   const name = `${relation.schema}.${relation.name}`;
   return (
     <article
       className={`diagram-table${outsideSchema ? " diagram-external" : ""}`}
       aria-label={name}
     >
-      <header title={name}>
+      <header className="diagram-table-header" title={name}>
         <Table2
           className="flex-none text-(--diagram-accent)"
           size={15}
@@ -55,73 +53,86 @@ function DiagramTable({ id, data }: NodeProps<TableNode>) {
           <strong>{relation.name}</strong>
         </div>
       </header>
-      {columns.map((column) => (
-        <div
-          className="diagram-column"
-          key={column.name}
-          title={`${column.name} · ${column.type}`}
-        >
-          {column.inbound && (
-            <Handle
-              id={portId(id, column.name, "in")}
-              type="target"
-              position={Position.Left}
-            />
-          )}
-          {column.outbound && (
-            <Handle
-              id={portId(id, column.name, "out")}
-              type="source"
-              position={Position.Right}
-            />
-          )}
-          <span className="diagram-key">
-            {column.primaryKeyPosition && (
-              <span aria-label="Primary key">
-                <KeyRound size={12} />
-              </span>
+      {columns.map((column) => {
+        const primary = Boolean(column.primaryKeyPosition);
+        const foreign = column.outbound;
+        const keyLabel = primary
+          ? foreign
+            ? "Primary and foreign key"
+            : "Primary key"
+          : "Foreign key";
+        return (
+          <div
+            className="diagram-column"
+            key={column.name}
+            title={`${column.name} · ${column.type}`}
+          >
+            {column.inbound && (
+              <Handle
+                id={portId(id, column.name, "in")}
+                type="target"
+                position={Position.Left}
+              />
             )}
             {column.outbound && (
-              <abbr className="no-underline" title="Foreign key">
-                FK
-              </abbr>
+              <Handle
+                id={portId(id, column.name, "out")}
+                type="source"
+                position={Position.Right}
+              />
             )}
-          </span>
-          <code>{column.name}</code>
-          <span className="diagram-column-type max-w-[77px]">
-            {column.type}
-          </span>
-        </div>
-      ))}
+            <span>
+              {(primary || foreign) && (
+                <abbr className="diagram-key" title={keyLabel}>
+                  {primary && foreign ? "PK/FK" : primary ? "PK" : "FK"}
+                </abbr>
+              )}
+            </span>
+            <code>{column.name}</code>
+            <span className="diagram-column-type max-w-[77px]">
+              {column.type}
+            </span>
+          </div>
+        );
+      })}
       {!columns.length && (
         <div className="diagram-column diagram-no-keys">
           {relation.columns.length ? "No key columns" : "No columns"}
         </div>
       )}
-      <footer>
-        <button
-          className="nopan"
-          type="button"
-          aria-label={`Open data for ${name}`}
-          onClick={() => open(relation, "data")}
-        >
-          Data
-        </button>
-        <button
-          className="nopan"
-          type="button"
-          aria-label={`View structure for ${name}`}
-          onClick={() => open(relation, "structure")}
-        >
-          Structure
-        </button>
-      </footer>
     </article>
   );
 }
 
-function ForeignKeyEdge({ id, data, markerEnd }: EdgeProps<DiagramEdge>) {
-  return <BaseEdge id={id} path={data?.path ?? ""} markerEnd={markerEnd} />;
+function ForeignKeyEdge({
+  id,
+  data,
+  markerEnd,
+  sourceX,
+  sourceY,
+  sourcePosition,
+  targetX,
+  targetY,
+  targetPosition,
+}: EdgeProps<DiagramEdge>) {
+  const path =
+    data?.path ||
+    getSmoothStepPath({
+      sourceX,
+      sourceY,
+      sourcePosition,
+      targetX,
+      targetY,
+      targetPosition,
+      offset: sourceX < targetX ? Math.min(20, (targetX - sourceX) / 2) : 20,
+      centerY: sourceX >= targetX ? data?.detourY : undefined,
+    })[0];
+  const offset = data?.offset;
+  return (
+    <g transform={offset && `translate(${offset.x} ${offset.y})`}>
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} />
+    </g>
+  );
 }
 
 const nodeTypes = { table: DiagramTable };
@@ -133,7 +144,6 @@ type Props = {
   connecting: boolean;
   catalog: Relation[];
   onRefresh: () => void;
-  onOpenTable: OpenTable;
   onOpenSchema: () => void;
 };
 
@@ -151,12 +161,17 @@ function DiagramWorkspace({
   connecting,
   catalog,
   onRefresh,
-  onOpenTable,
   onOpenSchema,
 }: Props) {
   const { schema, table } = scope;
   const [allColumns, setAllColumns] = useState(false);
   const [search, setSearch] = useState("");
+  const [positions, setPositions] = useState<Record<string, XYPosition>>({});
+  const [drag, setDrag] = useState<{ id: string; position: XYPosition }>();
+  const moved = useMemo(
+    () => (drag ? { ...positions, [drag.id]: drag.position } : positions),
+    [drag, positions],
+  );
   const [selected, setSelected] = useState<string | undefined>(
     table === undefined ? undefined : tableId(schema, table),
   );
@@ -217,6 +232,7 @@ function DiagramWorkspace({
     () =>
       current?.nodes?.map((node) => ({
         ...node,
+        position: moved?.[node.id] ?? node.position,
         selected: selected === node.id,
         className:
           query &&
@@ -226,21 +242,39 @@ function DiagramWorkspace({
             ? "diagram-match"
             : undefined,
       })),
-    [current, query, selected],
+    [current, moved, query, selected],
   );
   const matches =
     nodes?.filter((node) => node.className === "diagram-match") ?? [];
-  const edges = useMemo(
-    () =>
-      current?.edges?.map((edge) => ({
+  const edges = useMemo(() => {
+    const defaults = new Map(
+      current?.nodes?.map((node) => [node.id, node.position]),
+    );
+    return current?.edges?.map((edge) => {
+      let data = edge.data;
+      const source = moved?.[edge.source];
+      const target = moved?.[edge.target];
+      const origin = defaults.get(edge.source);
+      if (source && origin && edge.source === edge.target && data?.path) {
+        data = {
+          ...data,
+          offset: { x: source.x - origin.x, y: source.y - origin.y },
+        };
+      } else if (source || target) {
+        const sourceY = (source ?? origin)?.y ?? 0;
+        const targetY = (target ?? defaults.get(edge.target))?.y ?? 0;
+        data = { detourY: Math.min(sourceY, targetY) - 20 };
+      }
+      return {
         ...edge,
+        data,
         className:
           selected === edge.source || selected === edge.target
             ? "diagram-edge-active"
             : undefined,
-      })),
-    [current, selected],
-  );
+      };
+    });
+  }, [current, moved, selected]);
   const error =
     (metadata?.sessionId === sessionId ? metadata?.error : undefined) ??
     current?.error;
@@ -325,39 +359,58 @@ function DiagramWorkspace({
           aria-label="Refresh diagram"
           title="Refresh diagram"
           disabled={connecting}
-          onClick={onRefresh}
+          onClick={() => {
+            setPositions({});
+            setDrag(undefined);
+            onRefresh();
+          }}
         >
           <RefreshCw size={14} />
         </Button>
       </div>
       {nodes?.length ? (
         <div className="diagram-canvas min-h-0 flex-1 bg-(--diagram-canvas)">
-          <TableActions.Provider value={onOpenTable}>
-            <ReactFlow
-              key={`${sessionId}:${allColumns}`}
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              nodesConnectable={false}
-              nodesDraggable={false}
-              edgesReconnectable={false}
-              elementsSelectable={false}
-              deleteKeyCode={null}
-              onNodeClick={(_, node) => setSelected(node.id)}
-              onPaneClick={() => setSelected(undefined)}
-              fitView
-              fitViewOptions={{ maxZoom: 1, padding: 28 }}
-              minZoom={0.04}
-            >
-              <Background
-                variant={BackgroundVariant.Lines}
-                gap={20}
-                color="var(--diagram-grid)"
-              />
-              <Controls showFitView={false} showInteractive={false} />
-            </ReactFlow>
-          </TableActions.Provider>
+          <ReactFlow
+            key={`${sessionId}:${allColumns}`}
+            nodes={nodes}
+            edges={edges}
+            nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            nodesConnectable={false}
+            edgesReconnectable={false}
+            elementsSelectable={false}
+            deleteKeyCode={null}
+            onNodeClick={(_, node) => setSelected(node.id)}
+            onNodesChange={(changes) => {
+              for (const change of changes) {
+                if (
+                  change.type === "position" &&
+                  change.dragging &&
+                  change.position
+                )
+                  setDrag({ id: change.id, position: change.position });
+              }
+            }}
+            onNodeDragStop={(_, node) => {
+              setPositions((previous) => ({
+                ...previous,
+                [node.id]: node.position,
+              }));
+              setDrag(undefined);
+            }}
+            onPaneClick={() => setSelected(undefined)}
+            fitView
+            fitViewOptions={{ maxZoom: 1, padding: 28 }}
+            minZoom={0.04}
+          >
+            <Background
+              variant={BackgroundVariant.Dots}
+              size={1.5}
+              gap={20}
+              color="var(--diagram-grid)"
+            />
+            <Controls showFitView={false} showInteractive={false} />
+          </ReactFlow>
         </div>
       ) : (
         <div className="diagram-status" role="status">

@@ -4,7 +4,7 @@
   @apply flex min-h-0 flex-1 flex-col;
   --diagram-surface: #fff;
   --diagram-canvas: #f7f7f8;
-  --diagram-grid: #e6e6ea;
+  --diagram-grid: #caccd5;
   --diagram-rule: #d5d5dc;
   --diagram-ink: #24252b;
   --diagram-muted: #555862;
@@ -14,7 +14,7 @@
 .dark .schema-diagram {
   --diagram-surface: #212227;
   --diagram-canvas: #1a1b1f;
-  --diagram-grid: #2c2d34;
+  --diagram-grid: #41434d;
   --diagram-rule: #464851;
   --diagram-ink: #f7f7f8;
   --diagram-muted: #babcc7;
@@ -48,7 +48,10 @@
   @apply outline-2 outline-(--diagram-accent);
 }
 .diagram-table header {
-  @apply flex h-[42px] cursor-pointer items-center gap-[9px] border-b border-(--diagram-rule) px-[10px];
+  @apply flex h-[42px] cursor-grab select-none items-center gap-[9px] border-b border-(--diagram-rule) px-[10px];
+}
+.react-flow__node.dragging .diagram-table-header {
+  @apply cursor-grabbing;
 }
 .diagram-table header strong,
 .diagram-table header small,
@@ -61,7 +64,10 @@
   @apply text-[10px] text-(--diagram-muted);
 }
 .diagram-column {
-  @apply relative grid h-[25px] grid-cols-[27px_minmax(0,1fr)_minmax(0,auto)] items-center gap-[6px] border-b border-(--diagram-rule) px-[10px];
+  @apply relative grid h-[25px] grid-cols-[35px_minmax(0,1fr)_minmax(0,auto)] items-center gap-[6px] border-b border-(--diagram-rule) px-[10px];
+}
+.diagram-column:last-child {
+  @apply border-b-0;
 }
 .diagram-column.diagram-no-keys {
   @apply flex text-(--diagram-muted);
@@ -71,13 +77,12 @@
   font-family: var(--mono);
 }
 .diagram-key {
-  @apply flex items-center gap-[2px] text-[9px] font-bold text-(--diagram-accent);
-}
-.diagram-table footer {
-  @apply flex h-[34px] items-center gap-[6px] px-[6px];
-}
-.diagram-table footer button {
-  @apply rounded-[2px] px-[5px] py-[3px] text-[11px] text-(--diagram-accent) hover:bg-(--diagram-canvas) focus-visible:bg-(--diagram-canvas);
+  @apply inline-block rounded-[3px] px-[3px] py-px text-[9px] leading-[13px] font-semibold text-(--diagram-accent) no-underline;
+  background: color-mix(
+    in srgb,
+    var(--diagram-accent) 10%,
+    var(--diagram-surface)
+  );
 }
 .diagram-table .react-flow__handle {
   @apply pointer-events-none size-[5px] border-0 bg-(--diagram-link);
